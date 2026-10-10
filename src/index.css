@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@theme{
+  --font-sans:Inter,system-ui,sans-serif;
+  --color-deep:#274245;--color-deep-2:#1D3336;--color-cream:#DFD6AE;--color-off:#F5F2E9;--color-sand:#E8DDC7;
+  --color-ink:#203437;--color-muted:#718080;--color-line:#D9D3BF;
+  --color-safe:#6B8E5A;--color-review:#C58B3A;--color-susp:#B85450;--color-crit:#7F1D1D;
+}
+html{scroll-behavior:smooth}
+body{background:#F5F2E9;color:#203437;font-family:Inter,system-ui,sans-serif;-webkit-font-smoothing:antialiased}
+:focus-visible{outline:2px solid #DFD6AE;outline-offset:2px;border-radius:4px}
+.on-light :focus-visible{outline-color:#274245}
+::selection{background:#DFD6AE;color:#274245}
+.leaflet-container{height:100%;width:100%;background:#E8DDC7;font-family:Inter,system-ui,sans-serif}
+.leaflet-tile-pane{filter:grayscale(1) sepia(.18) hue-rotate(120deg) saturate(.7) brightness(1.02) contrast(.9)}
+.leaflet-popup-content-wrapper{background:#F5F2E9;color:#203437;border-radius:12px;box-shadow:0 6px 24px #27424522}
+.leaflet-popup-tip{background:#F5F2E9}
+.leaflet-control-attribution{background:#F5F2E9cc!important;color:#718080}
+.route-anim{stroke-dasharray:6 10;animation:dash 1.4s linear infinite}
+@keyframes dash{to{stroke-dashoffset:-16}}
+.mk{position:relative;width:16px;height:16px;border-radius:50%;border:2px solid #F5F2E9;box-shadow:0 0 0 1px #27424566}
+.mk-pulse::after{content:"";position:absolute;inset:-6px;border-radius:50%;border:1.5px solid currentColor;animation:ring 2.2s ease-out infinite}
+@keyframes ring{from{transform:scale(.6);opacity:.8}to{transform:scale(1.9);opacity:0}}
+.mk-batch{width:22px;height:22px;border-radius:50%;background:#DFD6AE;border:3px solid #274245;box-shadow:0 0 0 6px #DFD6AE66;transition:transform .2s}
+.navlink{position:relative}
+.navlink::after{content:"";position:absolute;left:0;bottom:-4px;height:1px;width:100%;background:currentColor;transform:scaleX(0);transform-origin:left;transition:transform .3s}
+.navlink:hover::after,.navlink[aria-current=page]::after{transform:scaleX(1)}
+.hairgrid{background-image:linear-gradient(#DFD6AE14 1px,transparent 1px),linear-gradient(90deg,#DFD6AE14 1px,transparent 1px);background-size:56px 56px;-webkit-mask-image:radial-gradient(ellipse at 60% 50%,#000 20%,transparent 75%);mask-image:radial-gradient(ellipse at 60% 50%,#000 20%,transparent 75%)}
+@media (prefers-reduced-motion:reduce){*{animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}

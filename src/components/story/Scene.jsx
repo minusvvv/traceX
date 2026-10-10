@@ -1,0 +1,19 @@
+// Muted, editorial duotone scenes drawn in SVG so the project runs offline.
+// To use real photography later, set `src` on <ImageStory> and these are bypassed.
+const P={deep:"#274245",deep2:"#1D3336",cream:"#DFD6AE",sand:"#E8DDC7",off:"#F5F2E9",mid:"#4A6663",soft:"#8FA39B"};
+const Sky=({id,a,b})=><defs><linearGradient id={id} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor={a}/><stop offset="1" stopColor={b}/></linearGradient></defs>;
+const Hills=()=><><path d="M0 380 C160 320 300 350 440 330 S700 300 800 340 V600 H0Z" fill={P.mid} opacity=".55"/><path d="M0 430 C200 380 380 440 560 405 S740 390 800 410 V600 H0Z" fill={P.deep} opacity=".8"/></>;
+const Rows=({y=470})=>[0,1,2,3,4,5].map(i=><path key={i} d={`M${-40+i*150} 600 L${330+i*26} ${y} `} stroke={P.cream} strokeOpacity=".22" strokeWidth="2"/>);
+const scenes={
+ farm:<><Hills/><Rows/><circle cx="600" cy="170" r="54" fill={P.cream} opacity=".85"/><g fill={P.deep2}><rect x="120" y="300" width="70" height="46"/><path d="M110 302 L155 268 L200 302Z"/></g></>,
+ collect:<><rect y="380" width="800" height="220" fill={P.deep2}/><g fill={P.soft}>{[0,1,2].map(i=><g key={i}><rect x={200+i*130} y="300" width="80" height="150" rx="16"/><rect x={212+i*130} y="280" width="56" height="26" rx="8" fill={P.cream}/></g>)}</g><rect y="440" width="800" height="8" fill={P.cream} opacity=".4"/></>,
+ lab:<><rect y="410" width="800" height="190" fill={P.deep2}/><g stroke={P.cream} strokeWidth="6" fill="none" strokeLinecap="round"><path d="M270 180 V280 L210 390 H330 L270 280"/><path d="M420 220 V300 L380 390 H460 L420 300"/></g><path d="M222 360 H318 L330 390 H210Z" fill={P.cream} opacity=".55"/><g fill={P.soft}>{[0,1,2,3].map(i=><rect key={i} x={540+i*40} y="300" width="20" height="100" rx="8"/>)}</g></>,
+ truck:<><Hills/><rect y="470" width="800" height="130" fill={P.deep2}/><path d="M0 500 H800" stroke={P.cream} strokeDasharray="30 26" strokeOpacity=".5" strokeWidth="4"/><g><rect x="170" y="330" width="330" height="128" rx="14" fill={P.sand}/><path d="M500 360 H590 L630 410 V458 H500Z" fill={P.cream}/><rect x="540" y="374" width="46" height="30" fill={P.deep}/><circle cx="240" cy="466" r="28" fill={P.deep2} stroke={P.sand} strokeWidth="6"/><circle cx="560" cy="466" r="28" fill={P.deep2} stroke={P.sand} strokeWidth="6"/></g></>,
+ plant:<><rect y="440" width="800" height="160" fill={P.deep2}/><g fill={P.mid}><rect x="120" y="230" width="170" height="220"/><rect x="330" y="290" width="140" height="160"/><rect x="510" y="200" width="70" height="250"/></g><g fill={P.cream} opacity=".6">{[0,1,2].map(i=><rect key={i} x={140+i*46} y="260" width="26" height="34"/>)}</g><rect x="510" y="170" width="70" height="34" fill={P.soft}/><path d="M545 150 C540 110 590 100 580 60" stroke={P.soft} strokeWidth="14" fill="none" opacity=".5" strokeLinecap="round"/></>,
+ shelf:<><rect y="0" width="800" height="600" fill="none"/>{[220,330,440].map(y=><g key={y}><rect x="90" y={y+70} width="620" height="8" fill={P.cream} opacity=".45"/>{Array.from({length:9}).map((_,i)=><rect key={i} x={110+i*67} y={y+8} width="42" height="62" rx="6" fill={i%4===2?P.cream:P.soft} opacity={i%3?.8:.55}/>)}</g>)}</>,
+ scan:<><rect x="270" y="110" width="260" height="380" rx="30" fill={P.deep2} stroke={P.cream} strokeWidth="5"/><g fill={P.cream}>{Array.from({length:49}).map((_,i)=>{const x=i%7,y=(i/7|0);return ((x*3+y*5+x*y)%3!==0)&&<rect key={i} x={318+x*24} y={190+y*24} width="18" height="18" rx="3"/>})}</g></>};
+export default function Scene({kind="farm",className="",label}){
+  const id="sk"+kind;
+  return <svg viewBox="0 0 800 600" preserveAspectRatio="xMidYMid slice" className={className} role="img" aria-label={label||kind}>
+    <Sky id={id} a="#3B5A5C" b="#274245"/><rect width="800" height="600" fill={`url(#${id})`}/>{scenes[kind]}
+    <rect width="800" height="600" fill="#F5F2E9" opacity=".03"/></svg>}
