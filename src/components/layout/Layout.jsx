@@ -7,7 +7,7 @@ export default function Layout(){const [o,setO]=useState(false),{user,logout}=us
   useEffect(()=>setO(false),[pathname]);
   const consumer=pathname.startsWith("/consumer"),links=consumer?[["/consumer",t("nav.verify")],["/consumer/report",t("nav.report")],["/consumer/status",t("nav.status")],["/consumer/map",t("nav.map")]]:(NAV[user?.role]||[]);
   const cls=({isActive})=>"whitespace-nowrap rounded-full px-3 py-1.5 transition-colors duration-150 "+(isActive?"bg-white/12 text-cream":"text-off/70 hover:text-off hover:bg-white/6");
-  const out=async()=>{await logout();nav("/login")};
+  const out=async()=>{await logout();nav("/")};
   return <div className="min-h-screen bg-off text-ink on-light">
     <a href="#main" className="sr-only focus:not-sr-only focus:fixed focus:top-2 focus:left-2 focus:z-[2000] focus:bg-cream focus:text-deep focus:px-4 focus:py-2 focus:rounded-full">Skip to content</a>
     <header className="sticky top-0 z-[1000] bg-deep-grad shadow-[0_1px_0_#ffffff10,0_8px_24px_-12px_#20343766]"><div className="max-w-7xl mx-auto px-4 sm:px-6 h-14 flex items-center gap-6">

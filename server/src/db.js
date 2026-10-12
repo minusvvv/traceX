@@ -1,191 +1,84 @@
-import fs from "node:fs";
-import path from "node:path";
-import Database from "better-sqlite3";
+// MongoDB data layer (Mongoose). Field names intentionally mirror the API's snake_case row shape.
+// Timestamps are stored as ISO-8601 strings so they sort and compare lexicographically and serialise unchanged.
+import mongoose from "mongoose";
 import {config} from "./config.js";
 
-if (config.dbPath !== ":memory:") fs.mkdirSync(path.dirname(config.dbPath), {recursive: true});
-export const db = new Database(config.dbPath);
-db.pragma("journal_mode = WAL");
-db.pragma("foreign_keys = ON");
+mongoose.set("strictQuery", true);
+mongoose.set("transactionAsyncLocalStorage", true); // lets tx() attach one session to every operation inside it
 
-db.exec(`
-CREATE TABLE IF NOT EXISTS users(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  email TEXT NOT NULL UNIQUE COLLATE NOCASE,
-  name TEXT NOT NULL,
-  role TEXT NOT NULL CHECK(role IN ('lab','reviewer','admin','provider')),
-  password_hash TEXT NOT NULL,
-  lab_name TEXT, accreditation_ref TEXT,
-  active INTEGER NOT NULL DEFAULT 1,
-  failed_logins INTEGER NOT NULL DEFAULT 0, locked_until TEXT,
-  created_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS products(
-  id TEXT PRIMARY KEY,
-  name TEXT NOT NULL, category TEXT NOT NULL,
-  brand TEXT, manufacturer TEXT NOT NULL,
-  gtin TEXT UNIQUE,
-  attributes TEXT NOT NULL DEFAULT '{}'      -- optional, product-specific attributes (JSON)
-);
-CREATE TABLE IF NOT EXISTS batches(
-  id TEXT PRIMARY KEY COLLATE NOCASE,
-  product_id TEXT NOT NULL REFERENCES products(id),
-  lot_number TEXT COLLATE NOCASE,
-  quantity TEXT NOT NULL,
-  manufactured_on TEXT NOT NULL,
-  expires_on TEXT,                            -- NULL when expiry/best-before does not apply
-  facility TEXT NOT NULL,
-  temperature_c REAL,                         -- latest cold-chain reading, only where relevant
-  destination_place TEXT, destination_lat REAL, destination_lng REAL,
-  created_at TEXT NOT NULL,
-  is_demo INTEGER NOT NULL DEFAULT 0,
-  UNIQUE(product_id, lot_number)
-);
-CREATE TABLE IF NOT EXISTS supply_chain_records(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  batch_id TEXT NOT NULL REFERENCES batches(id),
-  stage TEXT NOT NULL,
-  party_name TEXT NOT NULL, party_role TEXT,
-  lat REAL, lng REAL, region TEXT,
-  occurred_at TEXT NOT NULL,
-  readings TEXT, notes TEXT, quality_score INTEGER,
-  source TEXT NOT NULL DEFAULT 'internal'
-);
-CREATE INDEX IF NOT EXISTS idx_scr_batch ON supply_chain_records(batch_id, occurred_at);
-CREATE TABLE IF NOT EXISTS complaints(
-  id TEXT PRIMARY KEY,
-  tracking_code TEXT NOT NULL UNIQUE,
-  idempotency_key TEXT UNIQUE,
-  batch_id TEXT REFERENCES batches(id),
-  product_id TEXT REFERENCES products(id),
-  submitted_identifier TEXT, identifier_source TEXT, product_text TEXT,
-  description TEXT NOT NULL, lang TEXT,
-  region TEXT, lat REAL, lng REAL,            -- coordinates rounded to ~100 m; never returned individually
-  contact TEXT,                               -- optional; never exposed publicly, masked for staff
-  sample_requested_at TEXT,
-  created_at TEXT NOT NULL,
-  is_demo INTEGER NOT NULL DEFAULT 0
-);
-CREATE INDEX IF NOT EXISTS idx_cmp_batch ON complaints(batch_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_cmp_product ON complaints(product_id, created_at);
-CREATE TABLE IF NOT EXISTS attachments(
-  id TEXT PRIMARY KEY,
-  owner_type TEXT NOT NULL CHECK(owner_type IN ('complaint','lab_report')),
-  owner_id TEXT NOT NULL, kind TEXT NOT NULL,
-  original_name TEXT, mime TEXT NOT NULL, size INTEGER NOT NULL, sha256 TEXT NOT NULL,
-  stored_name TEXT NOT NULL, uploaded_by INTEGER, uploaded_at TEXT NOT NULL
-);
-CREATE INDEX IF NOT EXISTS idx_att_owner ON attachments(owner_type, owner_id);
-CREATE TABLE IF NOT EXISTS thresholds(
-  scope TEXT PRIMARY KEY,                      -- 'global' or a category key
-  count INTEGER NOT NULL CHECK(count >= 1),
-  window_days INTEGER NOT NULL CHECK(window_days BETWEEN 1 AND 365),
-  updated_by INTEGER, updated_at TEXT
-);
-CREATE TABLE IF NOT EXISTS flags(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  target_type TEXT NOT NULL CHECK(target_type IN ('batch','product')),
-  target_id TEXT NOT NULL,
-  status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open','cleared')),
-  flagged_at TEXT NOT NULL, complaint_count INTEGER NOT NULL, threshold INTEGER NOT NULL, window_days INTEGER NOT NULL,
-  cleared_at TEXT, cleared_reason TEXT
-);
-CREATE UNIQUE INDEX IF NOT EXISTS one_open_flag ON flags(target_type, target_id) WHERE status = 'open';
-CREATE TABLE IF NOT EXISTS investigations(
-  id TEXT PRIMARY KEY,
-  batch_id TEXT REFERENCES batches(id),
-  product_id TEXT NOT NULL REFERENCES products(id),
-  flag_id INTEGER REFERENCES flags(id),
-  title TEXT NOT NULL, stage TEXT,
-  status TEXT NOT NULL CHECK(status IN ('open','awaiting_lab','lab_confirmed','traced','report_ready','closed_unconfirmed','closed')),
-  owner TEXT, summary TEXT,
-  opened_at TEXT NOT NULL, closed_at TEXT, closure_reason TEXT
-);
-CREATE INDEX IF NOT EXISTS idx_inv_batch ON investigations(batch_id);
-CREATE TABLE IF NOT EXISTS investigation_events(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  investigation_id TEXT NOT NULL REFERENCES investigations(id),
-  at TEXT NOT NULL, title TEXT NOT NULL,
-  state TEXT NOT NULL CHECK(state IN ('done','alert','pending')),
-  note TEXT, kind TEXT
-);
-CREATE TABLE IF NOT EXISTS sample_requests(
-  id TEXT PRIMARY KEY,
-  batch_id TEXT REFERENCES batches(id),
-  product_id TEXT NOT NULL REFERENCES products(id),
-  flag_id INTEGER REFERENCES flags(id),
-  investigation_id TEXT REFERENCES investigations(id),
-  assigned_lab TEXT,                           -- NULL = open to any accredited lab
-  status TEXT NOT NULL DEFAULT 'requested' CHECK(status IN ('requested','submitted','closed','cancelled')),
-  reason TEXT, requested_at TEXT NOT NULL, due_by TEXT
-);
-CREATE TABLE IF NOT EXISTS sample_request_complaints(
-  sample_request_id TEXT NOT NULL REFERENCES sample_requests(id),
-  complaint_id TEXT NOT NULL REFERENCES complaints(id),
-  PRIMARY KEY(sample_request_id, complaint_id)
-);
-CREATE TABLE IF NOT EXISTS lab_reports(
-  id TEXT PRIMARY KEY,
-  sample_request_id TEXT REFERENCES sample_requests(id),
-  batch_id TEXT NOT NULL REFERENCES batches(id),
-  lab_name TEXT NOT NULL, accreditation_ref TEXT NOT NULL,
-  outcome TEXT NOT NULL CHECK(outcome IN ('confirmed','not_confirmed','inconclusive')),
-  contamination_type TEXT, severity TEXT CHECK(severity IN ('minor','major','critical')),
-  results TEXT NOT NULL, notes TEXT,
-  status TEXT NOT NULL DEFAULT 'submitted' CHECK(status IN ('submitted','superseded')),
-  supersedes_id TEXT REFERENCES lab_reports(id), correction_reason TEXT,
-  submitted_by INTEGER, submitted_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS investigation_analysis(
-  investigation_id TEXT PRIMARY KEY REFERENCES investigations(id),
-  trace TEXT NOT NULL, hotspots TEXT NOT NULL, risk TEXT NOT NULL,
-  provider TEXT NOT NULL, warnings TEXT, computed_at TEXT NOT NULL, computed_by INTEGER
-);
-CREATE TABLE IF NOT EXISTS reports(
-  id TEXT PRIMARY KEY,
-  investigation_id TEXT NOT NULL REFERENCES investigations(id),
-  version INTEGER NOT NULL,
-  content TEXT NOT NULL, content_sha256 TEXT NOT NULL,
-  generated_by INTEGER, generated_at TEXT NOT NULL,
-  UNIQUE(investigation_id, version)
-);
-CREATE TABLE IF NOT EXISTS report_submissions(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  report_id TEXT NOT NULL REFERENCES reports(id),
-  attempt INTEGER NOT NULL,
-  adapter TEXT NOT NULL, simulated INTEGER NOT NULL,
-  status TEXT NOT NULL CHECK(status IN ('sent','acknowledged','failed')),
-  external_ref TEXT, error TEXT,
-  attempted_at TEXT NOT NULL, attempted_by INTEGER,
-  UNIQUE(report_id, attempt, status)
-);
-CREATE TABLE IF NOT EXISTS regulatory_decisions(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  investigation_id TEXT NOT NULL REFERENCES investigations(id),
-  batch_id TEXT REFERENCES batches(id),
-  decision TEXT NOT NULL CHECK(decision IN ('no_action','advisory_issued','recall_ordered','recall_closed')),
-  authority_ref TEXT NOT NULL, notes TEXT, decided_on TEXT NOT NULL,
-  recorded_by INTEGER, recorded_at TEXT NOT NULL
-);
-CREATE TABLE IF NOT EXISTS audit_log(
-  id INTEGER PRIMARY KEY AUTOINCREMENT,
-  at TEXT NOT NULL, actor_id INTEGER, actor_email TEXT, actor_role TEXT,
-  action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, details TEXT NOT NULL DEFAULT '{}',
-  prev_hash TEXT NOT NULL, hash TEXT NOT NULL
-);
-CREATE TRIGGER IF NOT EXISTS audit_no_update BEFORE UPDATE ON audit_log BEGIN SELECT RAISE(ABORT,'audit_log is append-only'); END;
-CREATE TRIGGER IF NOT EXISTS audit_no_delete BEFORE DELETE ON audit_log BEGIN SELECT RAISE(ABORT,'audit_log is append-only'); END;
-CREATE TRIGGER IF NOT EXISTS lab_report_immutable BEFORE UPDATE OF results, outcome, batch_id, lab_name, accreditation_ref, submitted_at, submitted_by, contamination_type, severity, notes ON lab_reports
-  BEGIN SELECT RAISE(ABORT,'lab report content is immutable; submit a correction instead'); END;
-CREATE TRIGGER IF NOT EXISTS lab_report_no_delete BEFORE DELETE ON lab_reports BEGIN SELECT RAISE(ABORT,'lab reports cannot be deleted'); END;
-CREATE TRIGGER IF NOT EXISTS report_immutable BEFORE UPDATE ON reports BEGIN SELECT RAISE(ABORT,'generated reports are immutable'); END;
-`);
+const {Schema} = mongoose, Mixed = Schema.Types.Mixed;
+const opts = {versionKey: false, minimize: false, strict: "throw"};
+const make = (name, coll, def, indexes = [], hooks) => {
+  const s = new Schema(def, opts);
+  for (const [spec, o] of indexes) s.index(spec, o);
+  hooks?.(s);
+  return mongoose.model(name, s, coll);
+};
+const WRITE_OPS = ["updateOne", "updateMany", "findOneAndUpdate", "replaceOne", "findOneAndReplace"], DELETE_OPS = ["deleteOne", "deleteMany", "findOneAndDelete"];
+const blockAll = msg => s => { for (const op of [...WRITE_OPS, ...DELETE_OPS]) s.pre(op, function () { throw new Error(msg); }); s.pre("save", function () { if (!this.isNew) throw new Error(msg); }); };
+
+export const User = make("User", "users", {email: {type: String, required: true, lowercase: true, trim: true}, name: String, role: String, password_hash: String, lab_name: String, accreditation_ref: String,
+  active: {type: Boolean, default: true}, failed_logins: {type: Number, default: 0}, locked_until: String, created_at: String}, [[{email: 1}, {unique: true}]]);
+export const Product = make("Product", "products", {_id: String, name: String, category: String, brand: String, manufacturer: String, gtin: String, attributes: {type: Mixed, default: {}}}, [[{gtin: 1}, {unique: true, sparse: true}]]);
+export const Batch = make("Batch", "batches", {_id: String, product_id: String, lot_number: String, lot_key: String, quantity: String, manufactured_on: String, expires_on: String, facility: String, temperature_c: Number,
+  destination_place: String, destination_lat: Number, destination_lng: Number, created_at: String, is_demo: {type: Boolean, default: false}}, [[{lot_key: 1}, {}], [{product_id: 1}, {}]]);
+export const SupplyRecord = make("SupplyRecord", "supply_chain_records", {batch_id: String, stage: String, party_name: String, party_role: String, lat: Number, lng: Number, region: String, occurred_at: String,
+  readings: Mixed, notes: String, quality_score: Number, source: {type: String, default: "internal"}}, [[{batch_id: 1, occurred_at: 1}, {}]]);
+export const Complaint = make("Complaint", "complaints", {_id: String, tracking_code: String, idempotency_key: String, batch_id: String, product_id: String, submitted_identifier: String, identifier_source: String, product_text: String,
+  description: String, lang: String, region: String, lat: Number, lng: Number, contact: String, submitted_by: String, sample_requested_at: String, created_at: String, is_demo: {type: Boolean, default: false}},
+  [[{tracking_code: 1}, {unique: true}], [{idempotency_key: 1}, {unique: true, sparse: true}], [{batch_id: 1, created_at: 1}, {}], [{product_id: 1, created_at: 1}, {}], [{submitted_by: 1, created_at: -1}, {}]]);
+export const Attachment = make("Attachment", "attachments", {_id: String, owner_type: String, owner_id: String, kind: String, original_name: String, mime: String, size: Number, sha256: String, stored_name: String, uploaded_by: String, uploaded_at: String}, [[{owner_type: 1, owner_id: 1}, {}]]);
+export const Threshold = make("Threshold", "thresholds", {_id: String, count: Number, window_days: Number, updated_by: String, updated_at: String});
+// open_key is set only while a flag is open; the sparse unique index therefore allows at most one open flag per target.
+export const Flag = make("Flag", "flags", {_id: String, target_type: String, target_id: String, status: String, open_key: String, flagged_at: String, complaint_count: Number, threshold: Number, window_days: Number, cleared_at: String, cleared_reason: String},
+  [[{open_key: 1}, {unique: true, sparse: true}]]);
+export const Investigation = make("Investigation", "investigations", {_id: String, batch_id: String, product_id: String, flag_id: String, title: String, stage: String, status: String, owner: String, summary: String, opened_at: String, closed_at: String, closure_reason: String}, [[{batch_id: 1}, {}]]);
+export const InvEvent = make("InvEvent", "investigation_events", {investigation_id: String, at: String, title: String, state: String, note: String, kind: String}, [[{investigation_id: 1, at: 1}, {}]]);
+export const SampleRequest = make("SampleRequest", "sample_requests", {_id: String, batch_id: String, product_id: String, flag_id: String, investigation_id: String, assigned_lab: String, status: {type: String, default: "requested"}, reason: String, requested_at: String, due_by: String});
+export const SrComplaint = make("SrComplaint", "sample_request_complaints", {sample_request_id: String, complaint_id: String}, [[{sample_request_id: 1, complaint_id: 1}, {unique: true}]]);
+// Lab reports are evidence: content can never change or be deleted; the only permitted update is marking a report superseded by a correction.
+export const LabReport = make("LabReport", "lab_reports", {_id: String, sample_request_id: String, batch_id: String, lab_name: String, accreditation_ref: String, outcome: String, contamination_type: String, severity: String,
+  results: Mixed, notes: String, active_key: String, status: {type: String, default: "submitted"}, supersedes_id: String, correction_reason: String, submitted_by: String, submitted_at: String}, [[{batch_id: 1, submitted_at: 1}, {}], [{active_key: 1}, {unique: true, sparse: true}]],
+  s => {
+    for (const op of ["updateOne", "updateMany", "findOneAndUpdate"]) s.pre(op, function () {
+      // The only permitted change: mark superseded (and release the one-active-report-per-request key).
+      const u = this.getUpdate() || {}, set = u.$set || {}, uns = u.$unset || {};
+      const ok = Object.keys(u).every(k => ["$set", "$unset"].includes(k)) && Object.keys(set).length === 1 && set.status === "superseded" && Object.keys(uns).every(k => k === "active_key");
+      if (!ok) throw new Error("lab report content is immutable; submit a correction instead");
+    });
+    for (const op of ["replaceOne", "findOneAndReplace", ...DELETE_OPS]) s.pre(op, function () { throw new Error("lab reports are immutable and cannot be replaced or deleted"); });
+    s.pre("save", function () { if (!this.isNew) throw new Error("lab report content is immutable; submit a correction instead"); });
+  });
+export const Analysis = make("Analysis", "investigation_analysis", {_id: String, trace: Mixed, hotspots: Mixed, risk: Mixed, provider: Mixed, warnings: Mixed, computed_at: String, computed_by: String});
+export const Report = make("Report", "reports", {_id: String, investigation_id: String, version: Number, content: Mixed, content_sha256: String, generated_by: String, generated_at: String},
+  [[{investigation_id: 1, version: 1}, {unique: true}]], blockAll("generated reports are immutable"));
+export const Submission = make("Submission", "report_submissions", {report_id: String, attempt: Number, adapter: String, simulated: Boolean, status: String, external_ref: String, error: String, attempted_at: String, attempted_by: String},
+  [[{report_id: 1, attempt: 1, status: 1}, {unique: true}]]);
+export const Decision = make("Decision", "regulatory_decisions", {investigation_id: String, batch_id: String, decision: String, authority_ref: String, notes: String, decided_on: String, recorded_by: String, recorded_at: String});
+export const Audit = make("Audit", "audit_log", {seq: Number, at: String, actor_id: String, actor_email: String, actor_role: String, action: String, entity_type: String, entity_id: String, details: String, prev_hash: String, hash: String},
+  [[{seq: 1}, {unique: true}], [{entity_type: 1, entity_id: 1}, {}]], blockAll("audit_log is append-only"));
+const Counter = make("Counter", "counters", {_id: String, seq: Number});
+
+export async function connectDb(uri = config.mongoUri) {
+  await mongoose.connect(uri, {serverSelectionTimeoutMS: 8000});
+  await Promise.all(Object.values(mongoose.models).map(m => m.init().catch(e => { console.error(`[db] index build failed for ${m.modelName}:`, e.message); throw e; })));
+  return mongoose.connection;
+}
+export const disconnectDb = () => mongoose.disconnect();
+export const dbName = () => mongoose.connection.name;
 
 export const nowIso = () => new Date().toISOString();
-export const jparse = (s, d = null) => { try { return s == null ? d : JSON.parse(s); } catch { return d; } };
-// Sequential human-readable ids ("C-1183"); safe because better-sqlite3 is synchronous.
-export function nextId(table, prefix, base = 1000) {
-  const r = db.prepare(`SELECT MAX(CAST(SUBSTR(id, ?) AS INTEGER)) m FROM ${table} WHERE id LIKE ?`).get(prefix.length + 2, prefix + "-%");
-  return `${prefix}-${Math.max(base, r.m || 0) + 1}`;
+export const jparse = (v, d = null) => v == null ? d : typeof v === "string" ? (() => { try { return JSON.parse(v); } catch { return d; } })() : v;
+export const up = s => String(s ?? "").trim().toUpperCase();
+
+// Atomic sequential ids ("C-1183"). The counter document is created on first use, then incremented atomically.
+export async function nextId(prefix, base = 1000) {
+  try { await Counter.updateOne({_id: prefix}, {$setOnInsert: {seq: base}}, {upsert: true}); } catch (e) { if (e.code !== 11000) throw e; }
+  return `${prefix}-${(await Counter.findOneAndUpdate({_id: prefix}, {$inc: {seq: 1}}, {new: true})).seq}`;
 }
-export const tx = fn => db.transaction(fn)();
+export const bumpCounter = (prefix, n) => Counter.updateOne({_id: prefix}, {$max: {seq: n}}, {upsert: true});
+
+// Runs fn atomically when MONGO_TRANSACTIONS=true (requires a replica set); otherwise just runs it.
+// Without transactions every operation is still individually atomic and validation always happens before writes.
+export const tx = fn => config.mongoTransactions ? mongoose.connection.transaction(fn) : fn();
+export const dropDatabase = () => mongoose.connection.dropDatabase();

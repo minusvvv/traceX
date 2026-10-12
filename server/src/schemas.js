@@ -6,6 +6,11 @@ const num = (min, max) => z.preprocess(v => (v === "" || v == null ? undefined :
 const iso = z.string().refine(v => !Number.isNaN(Date.parse(v)), "Must be a valid date/time");
 
 export const loginSchema = z.object({email: z.string().email().max(200), password: z.string().min(1).max(200)});
+export const consumerRegisterSchema = z.object({
+  name: z.string().trim().min(2, "Enter your name").max(100),
+  email: z.string().trim().email().max(200).transform(v => v.toLowerCase()),
+  password: z.string().min(12, "Use at least 12 characters").max(200),
+});
 
 export const complaintSchema = z.object({
   identifier: opt(z.string().trim().max(64).regex(/^[\w\-./ ]+$/, "Use letters, numbers, dashes, dots or slashes only")),

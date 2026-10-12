@@ -26,7 +26,9 @@ export const config = {
   cookieSecure: bool(env.COOKIE_SECURE, prod),
   forceHttps: bool(env.FORCE_HTTPS, false),
   corsOrigins: (env.CORS_ORIGIN || "http://localhost:5173").split(",").map(s => s.trim()).filter(Boolean),
-  dbPath: env.DB_PATH || path.join(root, "data", "tracex.db"),
+  mongoUri: env.MONGO_URI || "mongodb://127.0.0.1:27017/tracex",
+  // Multi-document transactions need a replica set (Atlas always is one). Leave false for a standalone mongod.
+  mongoTransactions: bool(env.MONGO_TRANSACTIONS, false),
   uploadDir: env.UPLOAD_DIR || path.join(root, "uploads"),
   seedOnEmpty: bool(env.SEED_ON_EMPTY, !prod),
   demoPassword: env.DEMO_PASSWORD || "",

@@ -26,21 +26,18 @@ export const uploader = ({types, maxBytes, maxFiles}) => multer({
 });
 
 // The declared MIME type is not trusted: the file's leading bytes must match it.
-export function persistFiles(files = [], {ownerType, ownerId, kind, userId = null, insert}) {
-  const saved = [];
+export function persistFiles(files = [], {ownerType, ownerId, kind, userId = null}) {
+  for (const f of files) if (!SIGS[f.mimetype]?.(f.buffer)) throw new HttpError(422, `“${f.originalname}” does not look like a valid ${EXT[f.mimetype]?.slice(1).toUpperCase() || "file"}.`);
+  const saved = []; // validate everything first so a bad later file cannot leave earlier files orphaned on disk
   for (const f of files) {
-    if (!SIGS[f.mimetype]?.(f.buffer)) throw new HttpError(422, `“${f.originalname}” does not look like a valid ${EXT[f.mimetype]?.slice(1).toUpperCase() || "file"}.`);
     const id = crypto.randomUUID(), stored = id + EXT[f.mimetype];
     fs.writeFileSync(path.join(config.uploadDir, stored), f.buffer, {flag: "wx"}); // never overwrites
-    const rec = {id, owner_type: ownerType, owner_id: ownerId, kind: f.kindOverride || kind, original_name: path.basename(f.originalname).slice(0, 120),
-      mime: f.mimetype, size: f.size, sha256: crypto.createHash("sha256").update(f.buffer).digest("hex"), stored_name: stored,
-      uploaded_by: userId, uploaded_at: new Date().toISOString()};
-    insert(rec);
-    saved.push(rec);
+    saved.push({_id: id, owner_type: ownerType, owner_id: ownerId, kind, original_name: path.basename(f.originalname).slice(0, 120), mime: f.mimetype, size: f.size,
+      sha256: crypto.createHash("sha256").update(f.buffer).digest("hex"), stored_name: stored, uploaded_by: userId, uploaded_at: new Date().toISOString()});
   }
   return saved;
 }
 export const filePath = rec => path.join(config.uploadDir, rec.stored_name);
-export const attachmentDto = a => ({id: a.id, kind: a.kind, name: a.original_name, mime: a.mime, size: a.size, sha256: a.sha256, uploadedAt: a.uploaded_at});
+export const attachmentDto = a => ({id: String(a._id ?? a.id), kind: a.kind, name: a.original_name, mime: a.mime, size: a.size, sha256: a.sha256, uploadedAt: a.uploaded_at});
 // Remove files that were written when the surrounding DB transaction later fails.
 export const discardFiles = recs => recs.forEach(r => fs.rmSync(path.join(config.uploadDir, r.stored_name), {force: true}));

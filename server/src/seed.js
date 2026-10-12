@@ -1,4 +1,4 @@
-// Demonstration data. Everything seeded here is FICTIONAL and flagged is_demo=1: it is not live government data,
+// Demonstration data. Everything seeded here is FICTIONAL and flagged is_demo: it is not live government data,
 // real laboratory verification, or a real regulatory decision. Dates are relative to the moment of seeding.
 import fs from "node:fs";
 import crypto from "node:crypto";
@@ -11,7 +11,8 @@ const at = (daysAgo, hm) => { const [h, m] = hm.split(":").map(Number), t = new 
 const G = {fat: 4.2, snf: 8.6, water: "Negative"};
 
 export async function seedDemo() {
-  const {db, nowIso, tx} = await import("./db.js");
+  const M = await import("./db.js");
+  const {User, Product, Batch, SupplyRecord, Complaint, Investigation, SampleRequest, nowIso, up, bumpCounter} = M;
   const {hashPassword} = await import("./auth.js");
   const {seedThresholds} = await import("./services/thresholds.js");
   const {onComplaintCreated, createSampleRequest, addInvestigationEvent} = await import("./services/prioritization.js");
@@ -21,18 +22,18 @@ export async function seedDemo() {
 
   const generated = !config.demoPassword, password = config.demoPassword || crypto.randomBytes(9).toString("base64url");
   const hash = await hashPassword(password);
-  seedThresholds();
+  await seedThresholds();
   const users = [
     ["admin@tracex.demo", "Demo Administrator", "admin"], ["reviewer@tracex.demo", "Demo FSSAI Reviewer", "reviewer"],
     ["lab.nashik@tracex.demo", "Demo Lab Analyst (Nashik)", "lab", "Nashik Lab", "NABL-DEMO-0001"],
     ["lab.pune@tracex.demo", "Demo Lab Analyst (Pune)", "lab", "Pune Reference Lab", "NABL-DEMO-0002"],
     ["provider@tracex.demo", "Demo Supply-Chain Data Provider", "provider"]];
-  const ins = db.prepare("INSERT INTO users(email,name,role,password_hash,lab_name,accreditation_ref,created_at) VALUES(?,?,?,?,?,?,?)");
-  for (const [e, n, r, l, a] of users) ins.run(e, n, r, hash, l || null, a || null, nowIso());
+  await User.insertMany(users.map(([email, name, role, lab_name, accreditation_ref]) => ({email, name, role, password_hash: hash, lab_name, accreditation_ref, created_at: nowIso()})));
+  await bumpCounter("INV", 15); // demo investigations below use explicit ids up to INV-015; auto-generated ones continue from INV-16
 
   // ---- products ----
-  const P = db.prepare("INSERT INTO products(id,name,category,brand,manufacturer,gtin,attributes) VALUES(?,?,?,?,?,?,?)");
-  [["PRD-MILK-FC", "Full-cream milk", "dairy", "Demo Dairy", "Thane Processing Plant (demo)", "8900000000011", {fatClass: "full cream"}],
+  await Product.insertMany(
+[["PRD-MILK-FC", "Full-cream milk", "dairy", "Demo Dairy", "Thane Processing Plant (demo)", "8900000000011", {fatClass: "full cream"}],
    ["PRD-MILK-TN", "Toned milk", "dairy", "Demo Dairy", "Pune Dairy Plant (demo)", "8900000000028", {fatClass: "toned"}],
    ["PRD-MILK-BF", "Buffalo milk", "dairy", "Demo Dairy", "Pune Dairy Plant (demo)", "8900000000035", {animal: "buffalo"}],
    ["PRD-BEV-OJ", "Orange fruit drink 200 ml", "beverage", "Demo Orchard", "Orchard Beverages Pvt Ltd (demo)", "8900000000042", {packSize: "200 ml", carbonated: false}],
@@ -40,15 +41,16 @@ export async function seedDemo() {
    ["PRD-SNK-CH", "Salted potato chips 52 g", "snack", "Crispo", "Crispo Foods Pvt Ltd (demo)", "8900000000066", {packSize: "52 g"}],
    ["PRD-SNK-CP", "Masala corn puffs 40 g", "snack", "Puffo", "Puffo Snacks Pvt Ltd (demo)", "8900000000073", {packSize: "40 g", allergens: ["may contain peanuts"]}],
    ["PRD-GRN-AT", "Whole wheat atta 5 kg", "grain", "Golden Mill", "Golden Mill Foods (demo)", "8900000000080", {packSize: "5 kg"}]]
-    .forEach(([id, n, c, b, m, g, a]) => P.run(id, n, c, b, m, g, JSON.stringify(a)));
+    
+    .map(([_id, name, category, brand, manufacturer, gtin, attributes]) => ({_id, name, category, brand, manufacturer, gtin, attributes})));
 
   // ---- batches and journeys ----
-  const B = db.prepare(`INSERT INTO batches(id,product_id,lot_number,quantity,manufactured_on,expires_on,facility,temperature_c,destination_place,destination_lat,destination_lng,created_at,is_demo)
-    VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)`);
-  const R = db.prepare(`INSERT INTO supply_chain_records(batch_id,stage,party_name,party_role,lat,lng,region,occurred_at,readings,notes,quality_score,source) VALUES(?,?,?,?,?,?,?,?,?,?,?,'demo-seed')`);
+  const BATCHES = [], RECS = [];
   const day = n => at(n, "00:00").slice(0, 10);
-  const batch = (id, pid, lot, qty, d, shelfDays, facility, temp, dest) => B.run(id, pid, lot, qty, day(d), shelfDays ? day(d - shelfDays) : null, facility, temp, dest?.[0] || null, dest?.[1] || null, dest?.[2] || null, at(d, "05:00"));
-  const rec = (b, stage, role, place, lat, lng, region, d, hm, readings, notes, qs) => R.run(b, stage, place, role, lat, lng, region, at(d, hm), readings ? JSON.stringify(readings) : null, notes, qs ?? null);
+  const batch = (id, pid, lot, qty, d, shelfDays, facility, temp, dest) => BATCHES.push({_id: id, product_id: pid, lot_number: lot, lot_key: up(lot), quantity: qty, manufactured_on: day(d), expires_on: shelfDays ? day(d - shelfDays) : undefined,
+    facility, temperature_c: temp ?? undefined, destination_place: dest?.[0], destination_lat: dest?.[1], destination_lng: dest?.[2], created_at: at(d, "05:00"), is_demo: true});
+  const rec = (b, stage, role, place, lat, lng, region, d, hm, readings, notes, qs) => RECS.push({batch_id: b, stage, party_name: place, party_role: role, lat, lng, region: region ?? undefined, occurred_at: at(d, hm),
+    readings: readings ?? undefined, notes: notes ?? undefined, quality_score: qs ?? undefined, source: "demo-seed"});
 
   // dairy
   batch("MILK-2026-001", "PRD-MILK-FC", "L2609A", "5,000 L", 7, 5, "Thane Processing Plant", 5.6, ["Pune Retail Hub", 18.53, 73.87]);
@@ -137,84 +139,89 @@ export async function seedDemo() {
   rec("GRN-2026-001", "Distribution", "distributor", "Nashik Grain Distributor", 19.99, 73.8, "Nashik", 7, "10:00", null, "Dispatched.");
   rec("GRN-2026-001", "Retail", "retailer", "Nashik Road Supermart", 19.95, 73.83, "Nashik", 6, "10:00", null, "On shelf.");
 
+  await Batch.insertMany(BATCHES);
+  await SupplyRecord.insertMany(RECS);
+
   // ---- complaints (inserted with past dates; the real prioritisation engine then evaluates them) ----
-  let seq = 1000;
-  const C = db.prepare(`INSERT INTO complaints(id,tracking_code,batch_id,product_id,submitted_identifier,identifier_source,description,lang,region,lat,lng,created_at,is_demo) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,1)`);
+  let seq = 1000, pend = [];
   const code = () => { const a = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789", b = crypto.randomBytes(12); const s = [...b].map(x => a[x % a.length]).join(""); return `${s.slice(0, 4)}-${s.slice(4, 8)}-${s.slice(8, 12)}`; };
   const complain = (batchId, productId, region, d, hm, text) => {
     const r = regionByName(region), id = `C-${++seq}`;
-    C.run(id, code(), batchId, productId, batchId || null, "manual", text, "en", region, r?.lat ?? null, r?.lng ?? null, at(d, hm));
+    pend.push({_id: id, tracking_code: code(), batch_id: batchId ?? undefined, product_id: productId, submitted_identifier: batchId ?? undefined, identifier_source: "manual", description: text, lang: "en", region, lat: r?.lat, lng: r?.lng, created_at: at(d, hm), is_demo: true});
     return {id, batch_id: batchId, product_id: productId};
   };
+  const flush = async () => { if (pend.length) { await Complaint.insertMany(pend); pend = []; } };
   // historical, product-level reports for trend charts and the public map (older than every threshold window)
   const hist = [["Mumbai Suburban", 6], ["Thane", 4], ["Pune", 5], ["Nashik", 3], ["Nagpur", 3], ["Navi Mumbai", 3]], prods = ["PRD-MILK-FC", "PRD-MILK-TN", "PRD-BEV-OJ", "PRD-OIL-SF", "PRD-SNK-CH", "PRD-GRN-AT"];
   let k = 0;
   for (const [region, n] of hist) for (let i = 0; i < n; i++, k++) complain(null, prods[k % prods.length], region, 35 + ((k * 11) % 85), "10:00", "Unusual taste or smell reported (historical demonstration record).");
 
   const lastOf = list => list[list.length - 1];
+  const INV = o => Investigation.create({owner: "Quality team", ...o});
   // MILK-003: one complaint (below threshold) + a manually requested sample
-  const m3 = complain("MILK-2026-003", "PRD-MILK-BF", "Pune", 1, "11:00", "Pack felt warm at purchase.");
-  db.prepare("INSERT INTO investigations(id,batch_id,product_id,title,stage,status,owner,summary,opened_at) VALUES(?,?,?,?,?,?,?,?,?)")
-    .run("INV-013", "MILK-2026-003", "PRD-MILK-BF", "Transit temperature excursion", "Transport", "open", "Logistics", "Temperature exceeded 8 °C for about 40 minutes. Quality readings remain within range.", at(1, "09:30"));
-  addInvestigationEvent("INV-013", "Temperature threshold exceeded", "alert", "8.4 °C peak", "temp", at(2, "14:00"));
-  addInvestigationEvent("INV-013", "Batch held at plant", "done", "Pune Dairy Plant", "hold", at(1, "09:00"));
-  createSampleRequest({batchId: "MILK-2026-003", productId: "PRD-MILK-BF", investigationId: "INV-013", reason: "Temperature excursion follow-up (reviewer request)"});
+  complain("MILK-2026-003", "PRD-MILK-BF", "Pune", 1, "11:00", "Pack felt warm at purchase."); await flush();
+  await INV({_id: "INV-013", batch_id: "MILK-2026-003", product_id: "PRD-MILK-BF", title: "Transit temperature excursion", stage: "Transport", status: "open", owner: "Logistics",
+    summary: "Temperature exceeded 8 °C for about 40 minutes. Quality readings remain within range.", opened_at: at(1, "09:30")});
+  await addInvestigationEvent("INV-013", "Temperature threshold exceeded", "alert", "8.4 °C peak", "temp", at(2, "14:00"));
+  await addInvestigationEvent("INV-013", "Batch held at plant", "done", "Pune Dairy Plant", "hold", at(1, "09:00"));
+  await createSampleRequest({batchId: "MILK-2026-003", productId: "PRD-MILK-BF", investigationId: "INV-013", reason: "Temperature excursion follow-up (reviewer request)"});
 
   // MILK-004: four complaints reach the threshold of 3 -> flag, sample request, investigation INV-014
-  db.prepare("INSERT INTO investigations(id,batch_id,product_id,title,stage,status,owner,summary,opened_at) VALUES(?,?,?,?,?,?,?,?,?)")
-    .run("INV-014", "MILK-2026-004", "PRD-MILK-FC", "Quality deviation after processing", "Distribution", "open", "Quality team",
-      "Fat and SNF readings dropped between processing and distribution. Consumer reports were received. Evidence is not yet conclusive.", at(1, "10:00"));
-  [["Collection recorded", "done", "Nashik Collection Point · 4,100 L", at(3, "07:00")], ["Quality test completed", "done", "Fat 4.1% · SNF 8.6% · water negative", at(3, "08:30")],
-   ["Processing recorded", "done", "Thane Processing Plant · quality 97%", at(2, "06:00")], ["Quality deviation detected", "alert", "Fat 3.5% · SNF 7.9% · quality 91%", at(1, "09:00")]]
-    .forEach(([t, s, n, w]) => addInvestigationEvent("INV-014", t, s, n, "history", w));
+  await INV({_id: "INV-014", batch_id: "MILK-2026-004", product_id: "PRD-MILK-FC", title: "Quality deviation after processing", stage: "Distribution", status: "open",
+    summary: "Fat and SNF readings dropped between processing and distribution. Consumer reports were received. Evidence is not yet conclusive.", opened_at: at(1, "10:00")});
+  for (const [t, s, n, w] of [["Collection recorded", "done", "Nashik Collection Point · 4,100 L", at(3, "07:00")], ["Quality test completed", "done", "Fat 4.1% · SNF 8.6% · water negative", at(3, "08:30")],
+    ["Processing recorded", "done", "Thane Processing Plant · quality 97%", at(2, "06:00")], ["Quality deviation detected", "alert", "Fat 3.5% · SNF 7.9% · quality 91%", at(1, "09:00")]]) await addInvestigationEvent("INV-014", t, s, n, "history", w);
   const m4 = [complain("MILK-2026-004", "PRD-MILK-FC", "Thane", 1, "13:00", "Thin texture and unusual taste."), complain("MILK-2026-004", "PRD-MILK-FC", "Thane", 1, "15:30", "Milk separated quickly after opening."),
     complain("MILK-2026-004", "PRD-MILK-FC", "Mumbai Suburban", 0, "06:20", "Watery milk, tasted different from usual."), complain("MILK-2026-004", "PRD-MILK-FC", "Mumbai Suburban", 0, "08:05", "Very thin; looked bluish.")];
-  tx(() => onComplaintCreated(lastOf(m4)));
+  await flush(); await onComplaintCreated(lastOf(m4));
 
   // beverage and snack with one or two complaints: counted, but below the threshold
   complain("BEV-2026-001", "PRD-BEV-OJ", "Mumbai Suburban", 1, "09:10", "Slightly fizzy and sour after opening.");
   complain("BEV-2026-001", "PRD-BEV-OJ", "Navi Mumbai", 0, "10:40", "Tasted fermented.");
-  complain("SNK-2026-001", "PRD-SNK-CH", "Pune", 2, "12:00", "Found a small piece of plastic in the pack.");
+  complain("SNK-2026-001", "PRD-SNK-CH", "Pune", 2, "12:00", "Found a small piece of plastic in the pack."); await flush();
 
   // OIL-001: five complaints -> flag -> laboratory CONFIRMS adulteration (analysis not yet run, so the reviewer can try traceability)
   const o = [["Pune", 5, "09:00"], ["Pune", 4, "12:00"], ["Nashik", 3, "10:00"], ["Pune", 2, "16:00"], ["Nashik", 1, "11:30"]]
     .map(([r, d, hm]) => complain("OIL-2026-001", "PRD-OIL-SF", r, d, hm, "Oil smells off and leaves a bitter aftertaste."));
-  db.prepare("INSERT INTO investigations(id,batch_id,product_id,title,stage,status,owner,summary,opened_at) VALUES(?,?,?,?,?,?,?,?,?)")
-    .run("INV-015", "OIL-2026-001", "PRD-OIL-SF", "Consumer complaints reached the review threshold", "Warehouse", "open", "Quality team", "Five consumer complaints about batch OIL-2026-001 were received. These are unverified reports; laboratory verification is required.", at(5, "10:00"));
-  tx(() => onComplaintCreated(lastOf(o)));
-  const pune = db.prepare("SELECT * FROM users WHERE email='lab.pune@tracex.demo'").get(), nashik = db.prepare("SELECT * FROM users WHERE email='lab.nashik@tracex.demo'").get();
-  const srOil = db.prepare("SELECT id FROM sample_requests WHERE batch_id='OIL-2026-001'").get().id;
-  submitLabReport(pune, {sampleRequestId: srOil, batchId: "OIL-2026-001", accreditationRef: pune.accreditation_ref, outcome: "confirmed", contaminationType: "Adulteration with foreign or mineral oil", severity: "major",
+  await flush();
+  await INV({_id: "INV-015", batch_id: "OIL-2026-001", product_id: "PRD-OIL-SF", title: "Consumer complaints reached the review threshold", stage: "Warehouse", status: "open",
+    summary: "Five consumer complaints about batch OIL-2026-001 were received. These are unverified reports; laboratory verification is required.", opened_at: at(5, "10:00")});
+  await onComplaintCreated(lastOf(o));
+  const withId = u => ({...u, id: String(u._id)});
+  const pune = withId(await User.findOne({email: "lab.pune@tracex.demo"}).lean()), nashik = withId(await User.findOne({email: "lab.nashik@tracex.demo"}).lean());
+  const srOil = (await SampleRequest.findOne({batch_id: "OIL-2026-001"}).lean())._id;
+  await submitLabReport(pune, {sampleRequestId: srOil, batchId: "OIL-2026-001", accreditationRef: pune.accreditation_ref, outcome: "confirmed", contaminationType: "Adulteration with foreign or mineral oil", severity: "major",
     results: {peroxide_value: 9.1, acid_value: 1.0, moisture: 0.1, adulterant: "Detected"}, notes: "Demonstration record: foreign oil detected."}, pdf());
 
   // SNK-002: three complaints -> flag -> laboratory does NOT confirm -> investigation closed, complaints remain recorded
   const s2 = [["Nagpur", 4, "10:00"], ["Nagpur", 3, "14:00"], ["Pune", 2, "09:00"]].map(([r, d, hm]) => complain("SNK-2026-002", "PRD-SNK-CP", r, d, hm, "Tasted stale and slightly rancid."));
-  tx(() => onComplaintCreated(lastOf(s2)));
-  const srSnk = db.prepare("SELECT id FROM sample_requests WHERE batch_id='SNK-2026-002'").get().id;
-  submitLabReport(pune, {sampleRequestId: srSnk, batchId: "SNK-2026-002", accreditationRef: pune.accreditation_ref, outcome: "not_confirmed",
+  await flush(); await onComplaintCreated(lastOf(s2));
+  const srSnk = (await SampleRequest.findOne({batch_id: "SNK-2026-002"}).lean())._id;
+  await submitLabReport(pune, {sampleRequestId: srSnk, batchId: "SNK-2026-002", accreditationRef: pune.accreditation_ref, outcome: "not_confirmed",
     results: {moisture: 2.2, peroxide_value: 2.3, foreign_matter: "Absent", salmonella: "Not detected"}, notes: "Demonstration record: no contamination found."}, pdf());
 
   // routine laboratory verifications for clean batches
-  db.prepare("INSERT INTO investigations(id,batch_id,product_id,title,stage,status,owner,summary,opened_at,closed_at,closure_reason) VALUES(?,?,?,?,?,?,?,?,?,?,?)")
-    .run("INV-011", "MILK-2026-001", "PRD-MILK-FC", "Routine verification", null, "closed", "Quality team", "Routine cross-check completed. No deviation found.", at(5, "10:42"), at(5, "11:00"), "Routine cross-check completed. No deviation found.");
-  addInvestigationEvent("INV-011", "Verification completed", "done", "All stages consistent", "history", at(5, "10:42"));
+  await INV({_id: "INV-011", batch_id: "MILK-2026-001", product_id: "PRD-MILK-FC", title: "Routine verification", status: "closed", summary: "Routine cross-check completed. No deviation found.",
+    opened_at: at(5, "10:42"), closed_at: at(5, "11:00"), closure_reason: "Routine cross-check completed. No deviation found."});
+  await addInvestigationEvent("INV-011", "Verification completed", "done", "All stages consistent", "history", at(5, "10:42"));
   const routine = (u, b, results) => submitLabReport(u, {batchId: b, accreditationRef: u.accreditation_ref, outcome: "not_confirmed", results, notes: "Demonstration record: routine verification."}, pdf());
-  routine(nashik, "MILK-2026-001", G);
-  routine(pune, "MILK-2026-002", {fat: 3.6, snf: 8.5, water: "Negative"});
-  routine(pune, "GRN-2026-001", {moisture: 11.0, aflatoxin_b1: 1.0, insect_damage: 0.2, foreign_matter: "Absent"});
-  audit(null, "seed.completed", "system", "demo", {note: "Demonstration data loaded"});
+  await routine(nashik, "MILK-2026-001", G);
+  await routine(pune, "MILK-2026-002", {fat: 3.6, snf: 8.5, water: "Negative"});
+  await routine(pune, "GRN-2026-001", {moisture: 11.0, aflatoxin_b1: 1.0, insect_damage: 0.2, foreign_matter: "Absent"});
+  await bumpCounter("C", seq);
+  await audit(null, "seed.completed", "system", "demo", {note: "Demonstration data loaded"});
   return {password, generated, users: users.map(u => u[0])};
 }
 
-// CLI: node src/seed.js [--reset]
+// CLI: node src/seed.js   (drops the configured database first, then loads demo data)
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  if (process.argv.includes("--reset")) {
-    for (const f of [config.dbPath, config.dbPath + "-wal", config.dbPath + "-shm"]) fs.rmSync(f, {force: true});
-    fs.rmSync(config.uploadDir, {recursive: true, force: true});
-  }
-  const {db} = await import("./db.js");
-  if (db.prepare("SELECT COUNT(*) n FROM users").get().n) { console.log("Database already has data. Use `npm run seed` (which resets) to start over."); process.exit(0); }
+  const {connectDb, disconnectDb} = await import("./db.js"), mongoose = (await import("mongoose")).default;
+  await connectDb();
+  if (process.argv.includes("--reset")) { await mongoose.connection.dropDatabase(); fs.rmSync(config.uploadDir, {recursive: true, force: true}); await connectDb(); }
+  const {User} = await import("./db.js");
+  if (await User.estimatedDocumentCount()) { console.log("Database already has data. Use `npm run seed` (which resets) to start over."); await disconnectDb(); process.exit(0); }
   const out = await seedDemo();
   console.log(`Seeded demonstration data. Accounts: ${out.users.join(", ")}`);
   console.log(out.generated ? `Generated demo password (shown once): ${out.password}` : "Password is the DEMO_PASSWORD from your environment.");
+  await disconnectDb();
 }

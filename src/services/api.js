@@ -2,7 +2,7 @@
 import {request, qs, apiUrl} from "./http.js";
 export {ApiError} from "./http.js";
 
-// public (no sign-in)
+// public data; complaint submission requires a signed-in consumer
 let metaPromise;
 export const getMeta = () => (metaPromise ||= request("/public/meta").catch(e => { metaPromise = null; throw e; }));
 export const getPublicBatch = id => request("/public/batches/" + encodeURIComponent(id));
@@ -13,6 +13,8 @@ export const getPublicHeatmap = f => request("/public/heatmap" + qs(f));
 
 // session
 export const login = (email, password) => request("/auth/login", {method: "POST", body: {email, password}});
+export const consumerLogin = (email, password) => request("/auth/consumer-login", {method: "POST", body: {email, password}});
+export const registerConsumer = body => request("/auth/register", {method: "POST", body});
 export const logout = () => request("/auth/logout", {method: "POST", body: {}});
 export const getSession = () => request("/auth/me");
 

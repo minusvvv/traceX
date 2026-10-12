@@ -1,10 +1,13 @@
-import {useRef,useState} from "react";import {Link,useSearchParams} from "react-router-dom";import {MapPin} from "lucide-react";import {submitComplaint,getMeta} from "../services/api.js";import useAsync from "../hooks/useAsync.js";
+import {useEffect,useRef,useState} from "react";import {Link,useSearchParams} from "react-router-dom";import {MapPin} from "lucide-react";import {submitComplaint,getMeta} from "../services/api.js";import useAsync from "../hooks/useAsync.js";
 import {Btn,Field,Notice,inputCls,describe} from "../components/common/Form.jsx";import {useT} from "../i18n/index.jsx";import {fmtDateTime} from "../utils/formatters.js";
+import {useAuth} from "../auth/AuthContext.jsx";
 const TYPES=["image/jpeg","image/png","image/webp"],MAX=5*1024*1024,newKey=()=>crypto.randomUUID();
 const bad=(list,t)=>{for(const f of list){if(!TYPES.includes(f.type))return t("report.err.type",{name:f.name});if(f.size>MAX)return t("report.err.size",{name:f.name})}return null};
-export default function ConsumerComplaint(){const {t}=useT(),[sp]=useSearchParams(),{data:meta}=useAsync(getMeta),key=useRef(newKey());
+export default function ConsumerComplaint(){const {t}=useT(),[sp]=useSearchParams(),{data:meta}=useAsync(getMeta),{user,ready,consumerLogin,registerConsumer}=useAuth(),key=useRef(newKey());
   const [f,setF]=useState({identifier:sp.get("batch")||"",productText:"",description:"",regionKey:"",contact:""}),[img,setImg]=useState(null),[photos,setPhotos]=useState([]),[loc,setLoc]=useState(null),[locMsg,setLocMsg]=useState(null),[det,setDet]=useState(null),
-    [step,setStep]=useState("edit"),[err,setErr]=useState({}),[top,setTop]=useState(null),[busy,setBusy]=useState(false),[done,setDone]=useState(null),[src,setSrc]=useState("manual");
+    [step,setStep]=useState("edit"),[err,setErr]=useState({}),[top,setTop]=useState(null),[busy,setBusy]=useState(false),[done,setDone]=useState(null),[src,setSrc]=useState("manual"),
+    [authMode,setAuthMode]=useState(null),[account,setAccount]=useState({name:"",email:"",password:""}),[authErr,setAuthErr]=useState(null),[authBusy,setAuthBusy]=useState(false);
+  useEffect(()=>{if(ready&&user?.role!=="consumer")setAuthMode("signup")},[ready,user]);
   const set=k=>e=>setF({...f,[k]:e.target.value});
   const detect=async file=>{setDet(null);if(!file)return;if(!("BarcodeDetector" in window)){setDet({m:t("detect.unsupported")});return}
     setDet({m:t("detect.checking")});try{const codes=await new window.BarcodeDetector().detect(await createImageBitmap(file));codes.length?setDet({m:t("detect.found",{code:codes[0].rawValue}),code:codes[0].rawValue}):setDet({m:t("detect.none")})}catch{setDet({m:t("detect.none")})}};
@@ -16,7 +19,21 @@ export default function ConsumerComplaint(){const {t}=useT(),[sp]=useSearchParam
   const submit=async()=>{if(busy)return;setBusy(true);setTop(null);const fd=new FormData();fd.append("description",f.description.trim());["identifier","productText","regionKey","contact"].forEach(k=>f[k].trim()&&fd.append(k,f[k].trim()));fd.append("identifierSource",src);fd.append("lang",document.documentElement.lang==="hi"?"hi":"en");
     if(loc){fd.append("lat",loc.lat);fd.append("lng",loc.lng)}if(img)fd.append("productImage",img);photos.forEach(p=>fd.append("photos",p));
     try{setDone(await submitComplaint(fd,key.current))}catch(x){setErr(x.fields||{});setTop(x.message||t("report.err.server"));setStep("edit")}finally{setBusy(false)}};
+  const startSubmit=()=>{if(user?.role==="consumer")submit();else{setAuthMode("signup");setAuthErr(null)}};
+  const authenticateAndSubmit=async e=>{e.preventDefault();setAuthErr(null);setAuthBusy(true);
+    try{if(authMode==="signup")await registerConsumer({name:account.name.trim(),email:account.email.trim(),password:account.password});else await consumerLogin(account.email.trim(),account.password);setAuthMode(null);if(step==="review")await submit()}
+    catch(x){setAuthErr(x.message||t("report.err.server"))}finally{setAuthBusy(false)}};
   const region=meta?.regions.find(r=>r.key===f.regionKey)?.name;
+  const accountDialog=authMode&&<div className="fixed inset-0 z-50 flex items-center justify-center bg-deep/60 p-4"><section role="dialog" aria-modal="true" aria-labelledby="consumer-auth-title" className="relative w-full max-w-md rounded-3xl bg-cream p-6 shadow-2xl">
+    <h2 id="consumer-auth-title" className="pr-10 text-2xl font-semibold text-deep">{authMode==="signup"?t("account.createTitle"):t("account.signInTitle")}</h2><p className="mt-2 text-sm text-muted">{t("account.required")}</p>
+    <div className="mt-5 flex gap-2"><Btn type="button" variant={authMode==="signup"?"deep":"ghost"} onClick={()=>{setAuthMode("signup");setAuthErr(null)}}>{t("account.create")}</Btn><Btn type="button" variant={authMode==="signin"?"deep":"ghost"} onClick={()=>{setAuthMode("signin");setAuthErr(null)}}>{t("account.signIn")}</Btn></div>
+    <form onSubmit={authenticateAndSubmit} className="mt-5 space-y-4">
+      {authMode==="signup"&&<Field id="account-name" label={t("account.name")}><input id="account-name" className={inputCls} autoComplete="name" required minLength={2} maxLength={100} value={account.name} onChange={e=>setAccount({...account,name:e.target.value})}/></Field>}
+      <Field id="account-email" label={t("account.email")}><input id="account-email" type="email" className={inputCls} autoComplete="email" required maxLength={200} value={account.email} onChange={e=>setAccount({...account,email:e.target.value})}/></Field>
+      <Field id="account-password" label={t("account.password")} hint={authMode==="signup"?t("account.passwordHelp"):undefined}><input id="account-password" type="password" className={inputCls} autoComplete={authMode==="signup"?"new-password":"current-password"} required minLength={authMode==="signup"?12:1} maxLength={200} value={account.password} onChange={e=>setAccount({...account,password:e.target.value})}/></Field>
+      {authErr&&<Notice tone="error">{authErr}</Notice>}<Btn type="submit" loading={authBusy} className="w-full">{authMode==="signup"?(step==="review"?t("account.createAndSubmit"):t("account.createAndContinue")):(step==="review"?t("account.signInAndSubmit"):t("account.signInAndContinue"))}</Btn>
+    </form>
+  </section></div>;
   if(done)return <div className="max-w-xl mx-auto py-8"><h1 className="text-3xl font-semibold tracking-tight text-deep">{t("done.title")}</h1>
     {done.duplicate&&<Notice tone="info" className="mt-4">{t("done.dup")}</Notice>}
     <dl className="mt-6 divide-y divide-line text-sm"><div className="flex justify-between py-3"><dt className="text-muted">{t("done.id")}</dt><dd className="font-medium text-deep">{done.complaintId}</dd></div><div className="flex justify-between py-3"><dt className="text-muted">{t("done.track")}</dt><dd className="font-mono font-semibold text-deep tracking-wider">{done.trackingCode}</dd></div><div className="flex justify-between py-3"><dt className="text-muted">{t("status.received")}</dt><dd>{fmtDateTime(done.receivedAt)}</dd></div>
@@ -24,10 +41,11 @@ export default function ConsumerComplaint(){const {t}=useT(),[sp]=useSearchParam
     <p className="mt-4 text-sm">{done.matched==="batch"?t("done.matchedBatch",{id:done.product.batchId}):done.matched==="product"?t("done.matchedProduct"):t("done.unmatched")}</p>
     <p className="mt-2 text-sm font-medium text-deep">{t("done.save")}</p><p className="mt-1 text-sm text-muted">{t("st."+done.status)}</p>
     <div className="mt-8 flex gap-4"><Link className="navlink" to={"/consumer/status/"+done.trackingCode}>{t("done.view")}</Link><button className="navlink" onClick={()=>{setDone(null);key.current=newKey();setStep("edit");setF({identifier:"",productText:"",description:"",regionKey:"",contact:""});setImg(null);setPhotos([])}}>{t("done.another")}</button></div></div>;
-  if(step==="review")return <div className="max-w-xl mx-auto py-8"><h1 className="text-3xl font-semibold tracking-tight text-deep">{t("report.reviewTitle")}</h1><p className="text-muted mt-2">{t("report.reviewHelp")}</p>
+  if(step==="review")return <><div className="max-w-xl mx-auto py-8"><h1 className="text-3xl font-semibold tracking-tight text-deep">{t("report.reviewTitle")}</h1><p className="text-muted mt-2">{t("report.reviewHelp")}</p>
     <dl className="mt-6 divide-y divide-line text-sm">{[[t("report.identifier"),f.identifier||t("report.none")],[t("report.productName"),f.productText||t("report.none")],[t("report.image"),img?.name||t("report.none")],[t("report.description"),f.description],[t("report.photos"),photos.map(p=>p.name).join(", ")||t("report.none")],[t("report.location"),loc?t("report.locationOk"):region||t("report.regionNone")],[t("report.contact"),f.contact||t("report.none")]].map(([k,v])=><div key={k} className="py-3 grid sm:grid-cols-[170px_1fr] gap-1"><dt className="text-muted">{k}</dt><dd className="break-words">{v}</dd></div>)}</dl>
-    {top&&<Notice tone="error" className="mt-4">{top}</Notice>}<div className="mt-6 flex gap-3"><Btn variant="ghost" onClick={()=>setStep("edit")} disabled={busy}>{t("report.edit")}</Btn><Btn onClick={submit} disabled={busy}>{busy?t("report.submitting"):t("report.submit")}</Btn></div></div>;
-  return <form onSubmit={review} noValidate className="max-w-xl mx-auto py-8 space-y-6"><div><h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-deep">{t("report.title")}</h1><p className="text-muted mt-2">{t("report.sub")}</p></div>
+    {top&&<Notice tone="error" className="mt-4">{top}</Notice>}<div className="mt-6 flex gap-3"><Btn variant="ghost" onClick={()=>setStep("edit")} disabled={busy}>{t("report.edit")}</Btn><Btn onClick={startSubmit} disabled={busy}>{busy?t("report.submitting"):t("report.submit")}</Btn></div></div>
+    {accountDialog}</>;
+  return <><form onSubmit={review} noValidate className="max-w-xl mx-auto py-8 space-y-6"><div><h1 className="text-3xl md:text-4xl font-semibold tracking-tight text-deep">{t("report.title")}</h1><p className="text-muted mt-2">{t("report.sub")}</p></div>
     {top&&<Notice tone="error">{top}</Notice>}
     <Field id="img" label={t("report.image")} hint={t("report.imageHelp")} error={err.img}><input id="img" type="file" accept="image/jpeg,image/png,image/webp" capture="environment" onChange={onImg} className="text-sm" aria-describedby={describe("img",true,err.img)}/>
       {det&&<p className="text-sm mt-2" role="status">{det.m} {det.code&&<button type="button" className="navlink ml-2" onClick={()=>{setF({...f,identifier:det.code});setSrc("scan")}}>{t("detect.use")}</button>}</p>}{img&&<p className="text-xs text-ink/60 mt-1">{t("detect.ocr")}</p>}</Field>
@@ -38,4 +56,4 @@ export default function ConsumerComplaint(){const {t}=useT(),[sp]=useSearchParam
     <fieldset className="space-y-3"><legend className="text-sm font-medium text-deep">{t("report.location")}</legend><Btn type="button" variant="ghost" onClick={geo}><MapPin size={16}/>{t("report.useLocation")}</Btn>{locMsg&&<p role="status" className="text-sm">{locMsg}</p>}
       <Field id="rg" label={t("report.region")} error={err.region}><select id="rg" className={inputCls} value={f.regionKey} onChange={set("regionKey")}><option value="">{t("report.regionNone")}</option>{meta?.regions.map(r=><option key={r.key} value={r.key}>{r.name}</option>)}</select></Field></fieldset>
     <Field id="ct" label={t("report.contact")} hint={t("report.contactHelp")} optional={t("common.optional")??"optional"} error={err.contact}><input id="ct" className={inputCls} value={f.contact} onChange={set("contact")} autoComplete="email"/></Field>
-    <p className="text-sm text-ink/70">{t("report.privacy")}</p><Btn type="submit">{t("report.review")}</Btn></form>}
+    <p className="text-sm text-ink/70">{t("report.privacy")}</p><Btn type="submit">{t("report.review")}</Btn></form>{accountDialog}</>}
