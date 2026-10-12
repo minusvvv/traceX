@@ -7,3 +7,4 @@ export const JOURNEY=[
  {key:"manufacturing",name:"Manufacturing",line:"Processing recorded",text:"Processing and packing readings are compared with what arrived.",meta:["Example: processing plant","Quality 97%"],scene:"plant"},
  {key:"retail",name:"Retail",line:"Product reaches store",text:"The final hand-over is recorded, closing the chain from source to shelf.",meta:["Example: retail hub","On shelf"],scene:"shelf"},
  {key:"consumer",name:"Consumer",line:"Scan & verify",text:"Anyone can scan the pack and read the same verified journey.",meta:["Batch code on pack","Every recorded stage"],scene:"scan"}];
+//changes check .. 
