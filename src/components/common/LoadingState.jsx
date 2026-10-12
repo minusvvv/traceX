@@ -1,1 +1,2 @@
-export default function LoadingState(){return <div role="status" className="animate-pulse space-y-3"><div className="h-24 bg-sand/70 rounded-2xl"/><div className="h-48 bg-sand/70 rounded-2xl"/><span className="sr-only">Loading…</span></div>}
+import PageSkeleton from "../ui/Skeleton.jsx";
+export default function LoadingState({variant="list"}){return <PageSkeleton variant={variant}/>}

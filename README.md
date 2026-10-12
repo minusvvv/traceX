@@ -30,4 +30,4 @@ Reset demo data: `npm --prefix server run seed`. Tests: `npm test` (API integrat
 Consumer (anonymous): verify, complaint, status, public map. Lab: own/open sample requests + report upload. Reviewer: dashboard, investigations, internal hotspots, risk, reports, FSSAI decision records. Admin: same (except recording decisions) + users, thresholds, integrations, audit. Provider: `POST /api/provider/supply-chain/:batchId/records`.
 
 ## Limits
-UI was build-checked but not browser-tested; no lint config in repo; SRS performance targets untested; complaints without a batch cannot be linked later by staff; no cross-batch product-level flagging; risk weights are demo values.
+UI was checked in headless Chromium at 1440/834/390 px for the staff pages (no console errors, no horizontal overflow) but has no automated UI tests; no lint config in repo; SRS performance targets untested; complaints without a batch cannot be linked later by staff; no cross-batch product-level flagging; risk weights are demo values.

@@ -26,7 +26,7 @@ export function LiveMap(){
 export function Quality(){const {data:bs}=useAsync(getShowcase);
   const pick=(bs||[]).map(b=>({b,s:qualitySeries(b)})).map(x=>({...x,drop:Math.max(0,...x.s.slice(1).map((p,i)=>x.s[i].q-p.q))})).sort((a,c)=>c.drop-a.drop)[0],i=pick?pick.s.findIndex((p,k)=>k&&pick.s[k-1].q-p.q===pick.drop):-1;
   return <Wrap id="quality" className="on-light">
-  <div className="grid lg:grid-cols-[1fr_1.3fr] gap-16 items-center">
+  <div className="grid grid-cols-1 lg:grid-cols-[1fr_1.3fr] gap-16 items-center">
     <div><Reveal><h2 className="text-4xl md:text-5xl font-semibold tracking-tight text-deep leading-[1.05]">More than a dot on a map.</h2>
       <p className="mt-6 text-muted max-w-md">Every stage carries a quality reading. When one stage drifts from the one before it, TraceX marks the change and points to the stage that needs investigation.</p></Reveal>
       {pick&&pick.drop>0&&i>0&&<Reveal delay={.15} className="mt-10 border-l-2 border-susp pl-5"><p className="font-semibold text-susp">Quality deviation detected</p><p className="text-sm text-muted mt-1">{pick.b.id} · {pick.s[i].stage}, {pick.s[i-1].q}% to {pick.s[i].q}%. Stage requiring investigation.</p></Reveal>}
@@ -34,7 +34,7 @@ export function Quality(){const {data:bs}=useAsync(getShowcase);
     <Reveal>{pick?<><p className="text-sm text-muted mb-2">Quality score by stage · {pick.b.id} (demonstration data)</p><QualityChart data={pick.s} height={340}/></>:<p className="text-muted">Quality data is loading.</p>}</Reveal></div></Wrap>}
 
 export const Investigation=()=>{
-  return <Wrap id="investigate" className="bg-sand/60 on-light"><div className="grid lg:grid-cols-[1fr_1fr] gap-16">
+  return <Wrap id="investigate" className="bg-sand/60 on-light"><div className="grid grid-cols-1 lg:grid-cols-[1fr_1fr] gap-16">
     <div><Reveal><h2 className="text-4xl md:text-6xl font-semibold tracking-tight text-deep leading-[1.02]">Trace the change.<br/>Investigate the evidence.</h2>
       <p className="mt-6 text-muted max-w-md">TraceX never assigns blame automatically. It lays out what was recorded, when, and which stage needs a closer look.</p>
       <Link to="/investigations" className="group mt-8 inline-flex items-center gap-2 text-deep font-medium navlink">Open investigations (staff sign-in)<ArrowRight size={16} className="transition-transform group-hover:translate-x-1"/></Link></Reveal></div>
@@ -42,7 +42,7 @@ export const Investigation=()=>{
 
 export const ConsumerVerify=()=>{
   const steps=[[QrCode,"Scan batch QR","MILK-2026-001"],[MapPin,"Source","Nashik Collection Point"],[ShieldCheck,"Quality","Verified"],[Route,"Supply chain","6 recorded stages"]];
-  return <Wrap id="verify" className="on-light"><div className="grid md:grid-cols-2 gap-16 items-center">
+  return <Wrap id="verify" className="on-light"><div className="grid grid-cols-1 md:grid-cols-2 gap-16 items-center">
     <Reveal><h2 className="text-4xl md:text-5xl font-semibold tracking-tight text-deep leading-[1.05]">Trust you can check from the shelf.</h2>
       <p className="mt-6 text-muted max-w-md">Scan the pack and read the same journey the supply chain recorded. No account needed.</p>
       <div className="mt-8"><CTAButton to="/consumer/verify/MILK-2026-001" variant="deep">Try a verification</CTAButton></div></Reveal>
