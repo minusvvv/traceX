@@ -6,6 +6,8 @@ import {resolveIdentifier, loadBatches, toPublic} from "../domain/batches.js";
 import {persistFiles, discardFiles, attachmentDto} from "../uploads.js";
 import {regionByKey, nearestRegion} from "../geo.js";
 import {onComplaintCreated} from "./prioritization.js";
+import {config} from "../config.js";
+import {complaintSeverity} from "../domain/complaint-intensity.js";
 
 const ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 const trackingCode = () => {
@@ -139,4 +141,29 @@ export async function listComplaints({batchId, productId, category, status, from
       status: st, statusLabel: STATUS_LABEL[st], sampleRequested: !!c.sample_requested_at, contact: maskContact(c.contact), lang: c.lang, attachments: byOwner.get(c._id) || []};
   });
   return status ? out.filter(c => c.status === status) : out;
+}
+
+export async function listMyComplaints(userId) {
+  const rows = await Complaint.find({submitted_by: String(userId)}).sort({created_at: -1}).limit(200)
+    .select("_id tracking_code batch_id product_id product_text description region lat lng created_at sample_requested_at").lean();
+  const batchIds = [...new Set(rows.map(c => c.batch_id).filter(Boolean))];
+  const batches = new Map((await loadBatches({ids: batchIds})).map(b => [b.id, b]));
+  const productIds = [...new Set(rows.map(c => c.product_id).filter(Boolean))];
+  const products = new Map((await Product.find({_id: {$in: productIds}}).select("_id name").lean()).map(p => [p._id, p]));
+  const productFlags = new Set((await Flag.find({target_type: "product", target_id: {$in: productIds}, status: "open"}).select("target_id").lean()).map(f => f.target_id));
+  const cellDeg = config.publicMapCellDeg, cells = new Map();
+  for (const c of rows) {
+    if (c.lat == null || c.lng == null) continue;
+    const i = Math.floor(c.lat / cellDeg), j = Math.floor(c.lng / cellDeg), key = `${i}:${j}`;
+    const cell = cells.get(key) || {region: "Your reported area", lat: +((i + .5) * cellDeg).toFixed(3), lng: +((j + .5) * cellDeg).toFixed(3), reports: 0};
+    cell.reports++;
+    cells.set(key, cell);
+  }
+  const complaints = rows.map(c => {
+    const batch = c.batch_id ? batches.get(c.batch_id) : null, productId = batch?.productId || c.product_id, product = products.get(productId);
+    return {id: c._id, trackingCode: c.tracking_code, receivedAt: c.created_at, description: c.description,
+      product: product?.name || c.product_text || null, batchId: batch?.id || null, region: c.region || null,
+      status: complaintStatus(c, batch, productFlags.has(productId)), hasLocation: c.lat != null && c.lng != null};
+  });
+  return {complaints, cells: [...cells.values()].map(c => ({...c, radius: Math.round(cellDeg * 111000 * 0.6), severity: complaintSeverity(c.reports)})).sort((a, b) => b.reports - a.reports)};
 }

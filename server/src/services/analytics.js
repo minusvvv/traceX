@@ -2,6 +2,7 @@ import {Complaint, Investigation, Flag, LabReport, SupplyRecord, SampleRequest, 
 import {config} from "../config.js";
 import {loadBatches} from "../domain/batches.js";
 import {getCategory, categoryKeys, CATEGORIES} from "../domain/categories.js";
+import {complaintSeverity} from "../domain/complaint-intensity.js";
 
 const radiusFor = n => Math.min(26000, 8000 + n * 2500);
 const categoryOf = async rows => new Map((await Product.find({_id: {$in: [...new Set(rows.map(r => r.product_id).filter(Boolean))]}}).select("category").lean()).map(p => [p._id, p.category]));
@@ -20,14 +21,14 @@ export async function internalHotspots({category, batchId, productId, status, fr
   for (const r of rows) {
     const b = r.batch_id ? batches.get(r.batch_id) : null;
     if (status && (b?.status || "safe") !== status) continue;
-    const g = groups.get(r.region) || groups.set(r.region, {region: r.region, lat: 0, lng: 0, reports: 0, bset: new Set(), labSet: new Set(), sev: 0}).get(r.region);
+    const g = groups.get(r.region) || groups.set(r.region, {region: r.region, lat: 0, lng: 0, reports: 0, bset: new Set(), labSet: new Set()}).get(r.region);
     g.reports++; g.lat += r.lat; g.lng += r.lng;
-    if (b) { g.bset.add(b.id); if (b.labStatus === "confirmed") g.labSet.add(b.id); g.sev = Math.max(g.sev, {safe: 0, review: 1, suspicious: 2, critical: 3}[b.status]); }
+    if (b) { g.bset.add(b.id); if (b.labStatus === "confirmed") g.labSet.add(b.id); }
   }
   return [...groups.values()].map(g => {
     const ids = [...g.bset], open = invs.filter(i => ids.includes(i.batch_id) && !["closed", "closed_unconfirmed"].includes(i.status));
     const stages = open.map(i => i.stage).filter(Boolean), top = [...stages].sort((a, b) => stages.filter(x => x === b).length - stages.filter(x => x === a).length)[0];
-    return {region: g.region, lat: g.lat / g.reports, lng: g.lng / g.reports, radius: radiusFor(g.reports), severity: ["safe", "review", "suspicious", "critical"][g.sev],
+    return {region: g.region, lat: g.lat / g.reports, lng: g.lng / g.reports, radius: radiusFor(g.reports), severity: complaintSeverity(g.reports),
       reports: g.reports, batches: ids.length, lab: g.labSet.size, open: open.length, stage: top || "—"};
   }).sort((a, b) => b.reports - a.reports);
 }
@@ -35,15 +36,8 @@ export async function internalHotspots({category, batchId, productId, status, fr
 // Public heat map: coarse grid cells only. Cells under the minimum count are suppressed so a single complaint can never be located.
 export async function publicHeatmap({category, days = 90} = {}) {
   const since = new Date(Date.now() - days * 864e5).toISOString();
-  const flags = await Flag.find({status: "open"}).select("target_type target_id").lean();
-  const batchIds = flags.filter(f => f.target_type === "batch").map(f => f.target_id);
-  const productIds = flags.filter(f => f.target_type === "product").map(f => f.target_id);
-  const targets = [];
-  if (batchIds.length) targets.push({batch_id: {$in: batchIds}});
-  if (productIds.length) targets.push({batch_id: null, product_id: {$in: productIds}});
-  let rows = targets.length
-    ? await Complaint.find({lat: {$ne: null}, created_at: {$gte: since}, $or: targets}).select("lat lng product_id").lean()
-    : [];
+  let rows = await Complaint.find({lat: {$ne: null}, lng: {$ne: null}, created_at: {$gte: since}})
+    .select("lat lng product_id").lean();
   if (category) { const cm = await categoryOf(rows); rows = rows.filter(r => cm.get(r.product_id) === category); }
   const d = config.publicMapCellDeg, cells = new Map();
   for (const r of rows) { const key = Math.floor(r.lat / d) + ":" + Math.floor(r.lng / d); cells.set(key, (cells.get(key) || 0) + 1); }
@@ -52,10 +46,10 @@ export async function publicHeatmap({category, days = 90} = {}) {
     if (n < config.publicMapMinCell) continue;
     const [i, j] = key.split(":").map(Number);
     out.push({region: "Area with reports", lat: +((i + .5) * d).toFixed(3), lng: +((j + .5) * d).toFixed(3), radius: Math.round(d * 111000 * 0.6),
-      reports: n, severity: n >= config.publicMapMinCell * 3 ? "review" : "safe"});
+      reports: n, severity: complaintSeverity(n)});
   }
   return {cells: out.sort((a, b) => b.reports - a.reports), cellSizeKm: Math.round(d * 111), minReportsPerCell: config.publicMapMinCell, days,
-    notice: "Only reports linked to a target that has reached its review threshold are shown. Counts are unverified consumer reports, not findings of contamination; small clusters are hidden to protect privacy."};
+    notice: "Counts include reported complaints whether or not a product has reached its review threshold. They are unverified reports, not findings of contamination; small clusters are hidden to protect privacy."};
 }
 
 function bucket(iso, by) {

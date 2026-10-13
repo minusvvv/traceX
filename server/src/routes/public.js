@@ -8,7 +8,7 @@ import {complaintSchema} from "../schemas.js";
 import {requireRole} from "../auth.js";
 import {categoryMeta, categoryKeys} from "../domain/categories.js";
 import {loadBatch, loadBatches, resolveIdentifier, toPublic} from "../domain/batches.js";
-import {createComplaint, publicComplaintView} from "../services/complaints.js";
+import {createComplaint, publicComplaintView, listMyComplaints} from "../services/complaints.js";
 import {publicHeatmap} from "../services/analytics.js";
 import {uploader, IMAGE_TYPES, filePath, attachmentData} from "../uploads.js";
 import {REGIONS} from "../geo.js";
@@ -52,6 +52,7 @@ r.get("/complaints/:code", ah(async (req, res) => {
   if (!v) throw new HttpError(404, "No complaint found for that tracking code.");
   res.json(v);
 }));
+r.get("/my-complaints", requireRole("consumer"), ah(async (req, res) => res.json(await listMyComplaints(req.user.id))));
 r.get("/complaint-attachments/:id", ah(async (req, res) => {
   const a = await Attachment.findOne({_id: req.params.id, owner_type: "complaint", kind: {$in: ["photo", "product_image"]}}).select("mime stored_name data").lean();
   if (!a || !IMAGE_TYPES.includes(a.mime) || (!a.data && !fs.existsSync(filePath(a)))) throw new HttpError(404, "Image not found.");

@@ -66,6 +66,8 @@ test("authentication and authorization", async () => {
   assert.equal((await call("GET", "/complaints/summary", {cookie: C.nashik})).status, 403, "lab cannot read complaint totals");
   assert.equal((await call("GET", "/complaints/summary")).status, 401, "anonymous cannot read complaint totals");
   assert.equal((await call("GET", "/complaints/summary", {cookie: C.admin})).json.total, await M.Complaint.countDocuments(), "admin sees current complaint total");
+  assert.equal((await call("GET", "/public/my-complaints")).status, 401, "personal complaint map requires sign-in");
+  assert.equal((await call("GET", "/public/my-complaints", {cookie: C.rev})).status, 403, "personal complaint map is consumer-only");
   assert.equal((await call("PUT", "/admin/thresholds/global", {cookie: C.rev, body: {count: 2, windowDays: 30}})).status, 403, "reviewer cannot change thresholds");
   assert.equal((await call("GET", "/admin/users", {cookie: C.rev})).status, 403);
   assert.equal((await call("POST", "/investigations/INV-014/decision", {cookie: C.admin, body: {}})).status, 403, "only reviewers record decisions");
@@ -99,6 +101,10 @@ test("public views expose no internal or personal data", async () => {
   const heat = await call("GET", "/public/heatmap?days=365");
   assert.equal(heat.status, 200); assert.ok(heat.json.cells.length > 0);
   for (const c of heat.json.cells) { assert.ok(c.reports >= 3, "k-anonymity"); assert.deepEqual(Object.keys(c).sort(), ["lat", "lng", "radius", "region", "reports", "severity"]); }
+  const {regionByName} = await import("../src/geo.js"), {config} = await import("../src/config.js");
+  const mumbai = regionByName("Mumbai Suburban"), grid = config.publicMapCellDeg;
+  const mumbaiCell = heat.json.cells.find(c => c.lat === +((Math.floor(mumbai.lat / grid) + .5) * grid).toFixed(3) && c.lng === +((Math.floor(mumbai.lng / grid) + .5) * grid).toFixed(3));
+  assert.ok(mumbaiCell, "public map includes sufficiently large clusters of unflagged seeded complaints");
   assert.ok(!heat.text.includes("MILK-") && !heat.text.includes("batch"));
   assert.ok(heat.json.cells.every(c => (c.lat * 10) % 1 < 1e-6 || Math.abs(((c.lat * 100) % 10) - 5) < 1e-6), "cell centres, not exact points");
 });
@@ -126,6 +132,11 @@ test("complaint submission: validation, privacy, idempotency", async () => {
   assert.equal(a.status, 201); assert.match(a.json.trackingCode, /^[A-Z2-9]{4}-[A-Z2-9]{4}-[A-Z2-9]{4}$/); assert.equal(a.json.matched, "batch"); assert.equal(a.json.attachments, 2);
   assert.equal((await M.Complaint.findById(a.json.complaintId).lean()).submitted_by, C.consumerUserId, "complaint is linked to the signed-in consumer in MongoDB");
   assert.ok(!a.text.includes("consumer@example.com") && !("lat" in a.json) && !("contact" in a.json), "no PII echoed");
+  const ownReports = await call("GET", "/public/my-complaints", {cookie: C.consumer});
+  assert.equal(ownReports.status, 200);
+  assert.ok(ownReports.json.complaints.some(c => c.id === a.json.complaintId), "consumer sees their own submitted complaint in the map side panel");
+  assert.ok(ownReports.json.cells.some(c => c.region === "Your reported area" && c.reports >= 1), "consumer receives coarsened map areas for their own complaints");
+  assert.ok(!ownReports.text.includes("lab.nashik@tracex.demo"), "personal complaint list excludes other users' records");
   const again = complaintForm({identifier: "BEV-2026-001", regionKey: "pune"});
   const b = await call("POST", "/public/complaints", {form: again, headers: {"Idempotency-Key": key}});
   assert.equal(b.status, 200); assert.equal(b.json.duplicate, true); assert.equal(b.json.trackingCode, a.json.trackingCode);

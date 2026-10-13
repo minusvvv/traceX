@@ -10,6 +10,7 @@ export const getShowcase = () => request("/public/showcase");
 export const submitComplaint = (form, key) => request("/public/complaints", {method: "POST", form, headers: {"Idempotency-Key": key}});
 export const getComplaintStatus = code => request("/public/complaints/" + encodeURIComponent(code));
 export const getPublicHeatmap = f => request("/public/heatmap" + qs(f));
+export const getMyComplaints = () => request("/public/my-complaints");
 
 // session
 export const login = (email, password) => request("/auth/login", {method: "POST", body: {email, password}});
