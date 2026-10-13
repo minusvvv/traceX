@@ -13,7 +13,7 @@ import {listSampleRequests, getSampleRequest, listReports, reportDto, submitLabR
 import * as inv from "../services/investigations.js";
 import {renderReportPdf} from "../services/pdf.js";
 import {closeSchema, decisionSchema, labReportSchema, providerRecordsSchema, sampleSchema, simulateSchema} from "../schemas.js";
-import {uploader, REPORT_TYPES, filePath} from "../uploads.js";
+import {uploader, REPORT_TYPES, filePath, attachmentData} from "../uploads.js";
 import {listThresholds} from "../services/thresholds.js";
 
 const STAFF = ["reviewer", "admin"], LAB_VIEW = ["lab", ...STAFF];
@@ -30,6 +30,7 @@ r.get("/batches/:id/lab-reports", requireRole(...LAB_VIEW), ah(async (req, res) 
 
 // ---- complaints, prioritisation, dashboard, analytics (reviewers/administrators) ----
 r.get("/complaints", requireRole(...STAFF), ah(async (req, res) => res.json(await listComplaints({batchId: req.query.batch, productId: req.query.product, category: req.query.category, status: req.query.status, from: req.query.from, to: req.query.to}))));
+r.get("/complaints/summary", requireRole(...STAFF), ah(async (_q, res) => res.json({total: await Complaint.countDocuments()})));
 r.get("/prioritization", requireRole(...STAFF), ah(async (_q, res) => res.json({flagged: await rankFlagged(), thresholds: await listThresholds()})));
 r.get("/dashboard", requireRole(...STAFF), ah(async (_q, res) => res.json(await dashboardSummary())));
 const filters = q => ({category: categoryKeys.includes(q.category) ? q.category : undefined, status: ["safe", "review", "suspicious", "critical"].includes(q.status) ? q.status : undefined,
@@ -72,7 +73,7 @@ r.post("/reports/:id/acknowledge", requireRole(...STAFF), ah(async (req, res) =>
 // ---- attachments (never public) ----
 r.get("/attachments/:id", requireRole(...LAB_VIEW), ah(async (req, res) => {
   const a = await Attachment.findById(req.params.id).lean();
-  if (!a || !fs.existsSync(filePath(a))) throw new HttpError(404, "File not found.");
+  if (!a || (!a.data && !fs.existsSync(filePath(a)))) throw new HttpError(404, "File not found.");
   if (req.user.role === "lab") {
     const mine = (req.user.lab_name || "").toLowerCase();
     let ok = false;
@@ -86,7 +87,9 @@ r.get("/attachments/:id", requireRole(...LAB_VIEW), ah(async (req, res) => {
   }
   await audit(req.user, "attachment.downloaded", a.owner_type, a.owner_id, {attachment: a._id});
   res.setHeader("Content-Disposition", `attachment; filename="${a.original_name.replace(/[^\w.\- ]/g, "_")}"`);
-  res.type(a.mime).sendFile(filePath(a));
+  res.type(a.mime);
+  if (fs.existsSync(filePath(a))) res.sendFile(filePath(a));
+  else res.send(attachmentData(a.data));
 }));
 
 // ---- external supply-chain data provider ----

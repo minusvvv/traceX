@@ -10,7 +10,7 @@ import {categoryMeta, categoryKeys} from "../domain/categories.js";
 import {loadBatch, loadBatches, resolveIdentifier, toPublic} from "../domain/batches.js";
 import {createComplaint, publicComplaintView} from "../services/complaints.js";
 import {publicHeatmap} from "../services/analytics.js";
-import {uploader, IMAGE_TYPES, filePath} from "../uploads.js";
+import {uploader, IMAGE_TYPES, filePath, attachmentData} from "../uploads.js";
 import {REGIONS} from "../geo.js";
 
 export const limiter = (windowMs, max, message) => config.rateLimit
@@ -53,11 +53,13 @@ r.get("/complaints/:code", ah(async (req, res) => {
   res.json(v);
 }));
 r.get("/complaint-attachments/:id", ah(async (req, res) => {
-  const a = await Attachment.findOne({_id: req.params.id, owner_type: "complaint", kind: {$in: ["photo", "product_image"]}}).lean();
-  if (!a || !IMAGE_TYPES.includes(a.mime) || !fs.existsSync(filePath(a))) throw new HttpError(404, "Image not found.");
+  const a = await Attachment.findOne({_id: req.params.id, owner_type: "complaint", kind: {$in: ["photo", "product_image"]}}).select("mime stored_name data").lean();
+  if (!a || !IMAGE_TYPES.includes(a.mime) || (!a.data && !fs.existsSync(filePath(a)))) throw new HttpError(404, "Image not found.");
   res.setHeader("Cache-Control", "public, max-age=3600");
   res.setHeader("Content-Disposition", "inline");
-  res.type(a.mime).sendFile(filePath(a));
+  res.type(a.mime);
+  if (fs.existsSync(filePath(a))) res.sendFile(filePath(a));
+  else res.send(attachmentData(a.data));
 }));
 r.get("/heatmap", ah(async (req, res) => {
   const category = categoryKeys.includes(req.query.category) ? req.query.category : undefined;

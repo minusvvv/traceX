@@ -63,6 +63,9 @@ test("authentication and authorization", async () => {
   assert.equal((await call("GET", "/investigations", {cookie: C.nashik})).status, 403, "lab cannot read investigations");
   assert.equal((await call("GET", "/analytics/hotspots", {cookie: C.nashik})).status, 403, "lab cannot read internal hotspots");
   assert.equal((await call("GET", "/analytics/hotspots")).status, 401, "anonymous cannot read internal hotspots");
+  assert.equal((await call("GET", "/complaints/summary", {cookie: C.nashik})).status, 403, "lab cannot read complaint totals");
+  assert.equal((await call("GET", "/complaints/summary")).status, 401, "anonymous cannot read complaint totals");
+  assert.equal((await call("GET", "/complaints/summary", {cookie: C.admin})).json.total, await M.Complaint.countDocuments(), "admin sees current complaint total");
   assert.equal((await call("PUT", "/admin/thresholds/global", {cookie: C.rev, body: {count: 2, windowDays: 30}})).status, 403, "reviewer cannot change thresholds");
   assert.equal((await call("GET", "/admin/users", {cookie: C.rev})).status, 403);
   assert.equal((await call("POST", "/investigations/INV-014/decision", {cookie: C.admin, body: {}})).status, 403, "only reviewers record decisions");
@@ -174,6 +177,15 @@ test("same-lot complaints appear together and thresholded complaints reach the p
   assert.ok(imageId, "similar complaint image is included");
   const publicImage = await call("GET", "/public/complaint-attachments/" + imageId, {anonymous: true});
   assert.equal(publicImage.status, 200); assert.match(publicImage.headers.get("content-type"), /image\/png/);
+  const {attachmentData, filePath} = await import("../src/uploads.js");
+  const attachment = await M.Attachment.findById(imageId).lean(), storedPath = filePath(attachment), hiddenPath = storedPath + ".test-hidden";
+  assert.ok(attachment.data, "complaint image bytes are persisted with the attachment");
+  fs.renameSync(storedPath, hiddenPath);
+  try {
+    const fallback = await fetch(base + "/public/complaint-attachments/" + imageId);
+    assert.equal(fallback.status, 200, "complaint image is served when its local upload file is unavailable");
+    assert.deepEqual(Buffer.from(await fallback.arrayBuffer()), attachmentData(attachment.data));
+  } finally { fs.renameSync(hiddenPath, storedPath); }
   assert.ok(!JSON.stringify(status.json.similarReports).includes("consumer@example.com"), "related reports do not expose contact details");
   const unresolvedWithPhoto = complaintForm({identifier: "SHARED-UNMATCHED-TEST"});
   unresolvedWithPhoto.append("photos", png("unmatched.png"), "unmatched.png");
@@ -365,6 +377,7 @@ test("users, provider role, analytics and simulation guards", async () => {
   assert.ok((await call("GET", "/analytics", {cookie: C.rev})).json.byCategory.length >= 5);
   const hs = (await call("GET", "/analytics/hotspots?category=dairy", {cookie: C.rev})).json;
   assert.ok(hs.length && hs.every(h => ["region", "lat", "lng", "radius", "severity", "reports", "batches", "lab", "open", "stage"].every(k => k in h)));
+  assert.ok(hs.every(h => h.severity === (h.reports >= 10 ? "critical" : h.reports >= 5 ? "suspicious" : h.reports >= 3 ? "review" : "safe")), "map alert level is derived from report count, not batch status");
   const dash = (await call("GET", "/dashboard", {cookie: C.rev})).json;
   assert.ok(dash.events.length > 3 && dash.network.openInvestigations >= 1);
   const ig = (await call("GET", "/admin/integrations", {cookie: C.admin})).json;

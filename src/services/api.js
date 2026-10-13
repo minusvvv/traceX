@@ -25,6 +25,7 @@ export const getBatchLabReports = id => request(`/batches/${encodeURIComponent(i
 export const getDashboard = () => request("/dashboard");
 export const getPrioritization = () => request("/prioritization");
 export const getComplaints = f => request("/complaints" + qs(f));
+export const getComplaintSummary = () => request("/complaints/summary");
 export const getAnalytics = f => request("/analytics" + qs(f));
 export const getHotspots = f => request("/analytics/hotspots" + qs(f));
 export const getInvestigations = f => request("/investigations" + qs(f));

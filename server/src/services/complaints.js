@@ -50,7 +50,7 @@ export async function createComplaint(input, files = {}, actor = null) {
   const id = await nextId("C", 1000), code = trackingCode(), at = nowIso();
   let written = [], outcome;
   try {
-    written = [...persistFiles(files.productImage, {ownerType: "complaint", ownerId: id, kind: "product_image"}), ...persistFiles(files.photos, {ownerType: "complaint", ownerId: id, kind: "photo"})];
+    written = [...persistFiles(files.productImage, {ownerType: "complaint", ownerId: id, kind: "product_image", storeData: true}), ...persistFiles(files.photos, {ownerType: "complaint", ownerId: id, kind: "photo", storeData: true})];
     await tx(async () => {
       await Complaint.create({_id: id, tracking_code: code, idempotency_key: input.idempotencyKey || undefined, batch_id: batchId, product_id: productId, submitted_identifier: input.identifier || undefined,
         identifier_source: input.identifierSource || "manual", product_text: input.productText || undefined, description: input.description, lang: input.lang || "en", region, lat, lng, contact: input.contact || undefined,
