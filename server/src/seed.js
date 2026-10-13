@@ -24,7 +24,7 @@ export async function seedDemo() {
   const hash = await hashPassword(password);
   await seedThresholds();
   const users = [
-    ["admin@tracex.demo", "Demo Administrator", "admin"], ["reviewer@tracex.demo", "Demo FSSAI Reviewer", "reviewer"],
+    ["admin@tracex.demo", process.env.ADMIN_NAME || "Vedang Bhukan", "admin"], ["reviewer@tracex.demo", "Demo FSSAI Reviewer", "reviewer"],
     ["lab.nashik@tracex.demo", "Demo Lab Analyst (Nashik)", "lab", "Nashik Lab", "NABL-DEMO-0001"],
     ["lab.pune@tracex.demo", "Demo Lab Analyst (Pune)", "lab", "Pune Reference Lab", "NABL-DEMO-0002"],
     ["provider@tracex.demo", "Demo Supply-Chain Data Provider", "provider"]];
@@ -213,13 +213,45 @@ export async function seedDemo() {
   return {password, generated, users: users.map(u => u[0])};
 }
 
+export async function syncAdminUser({
+  email = process.env.ADMIN_EMAIL || "admin@tracex.demo",
+  name = process.env.ADMIN_NAME || "Vedang Bhukan",
+  password = config.demoPassword
+} = {}) {
+  const {User, nowIso} = await import("./db.js");
+  const {hashPassword} = await import("./auth.js");
+  if (!password) throw new Error("DEMO_PASSWORD environment variable is required to set the admin password.");
+  const hash = await hashPassword(password);
+  const updated = await User.findOneAndUpdate(
+    {email: email.toLowerCase()},
+    {$set: {password_hash: hash, ...(name ? {name} : {}), failed_logins: 0}, $unset: {locked_until: 1}},
+    {new: true}
+  );
+  if (!updated) {
+    return await User.create({
+      email: email.toLowerCase(),
+      name: name || "Vedang Bhukan",
+      role: "admin",
+      password_hash: hash,
+      created_at: nowIso(),
+    });
+  }
+  return updated;
+}
+
 // CLI: node src/seed.js   (drops the configured database first, then loads demo data)
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const {connectDb, disconnectDb} = await import("./db.js"), mongoose = (await import("mongoose")).default;
   await connectDb();
+  if (process.argv.includes("--admin")) {
+    const admin = await syncAdminUser();
+    console.log(`[seed] Admin user (${admin.email}) updated with configured password and unlocked.`);
+    await disconnectDb();
+    process.exit(0);
+  }
   if (process.argv.includes("--reset")) { await mongoose.connection.dropDatabase(); fs.rmSync(config.uploadDir, {recursive: true, force: true}); await connectDb(); }
   const {User} = await import("./db.js");
-  if (await User.estimatedDocumentCount()) { console.log("Database already has data. Use `npm run seed` (which resets) to start over."); await disconnectDb(); process.exit(0); }
+  if (await User.estimatedDocumentCount()) { console.log("Database already has data. Use `npm run seed` (which resets) to start over, or `node src/seed.js --admin` to update the admin account."); await disconnectDb(); process.exit(0); }
   const out = await seedDemo();
   console.log(`Seeded demonstration data. Accounts: ${out.users.join(", ")}`);
   console.log(out.generated ? `Generated demo password (shown once): ${out.password}` : "Password is the DEMO_PASSWORD from your environment.");
