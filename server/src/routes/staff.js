@@ -8,7 +8,7 @@ import {categoryKeys} from "../domain/categories.js";
 import {loadBatch, loadBatches} from "../domain/batches.js";
 import {listComplaints} from "../services/complaints.js";
 import {rankFlagged} from "../services/prioritization.js";
-import {analytics, dashboardSummary, internalHotspots} from "../services/analytics.js";
+import {analytics, dashboardSummary, internalHotspots, issueCorrelations} from "../services/analytics.js";
 import {listSampleRequests, getSampleRequest, listReports, reportDto, submitLabReport} from "../services/lab.js";
 import * as inv from "../services/investigations.js";
 import {renderReportPdf} from "../services/pdf.js";
@@ -38,6 +38,7 @@ const filters = q => ({category: categoryKeys.includes(q.category) ? q.category 
   batchId: q.batch || undefined});
 r.get("/analytics", requireRole(...STAFF), ah(async (req, res) => res.json(await analytics(filters(req.query)))));
 r.get("/analytics/hotspots", requireRole(...STAFF), ah(async (req, res) => res.json(await internalHotspots(filters(req.query)))));
+r.get("/analytics/correlations", requireRole(...STAFF), ah(async (req, res) => res.json(await issueCorrelations(filters(req.query)))));
 
 // ---- laboratory ----
 r.get("/lab/sample-requests", requireRole(...LAB_VIEW), ah(async (req, res) => res.json(await listSampleRequests(req.user, {status: req.query.status}))));

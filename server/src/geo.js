@@ -17,9 +17,41 @@ export function haversineKm(a, b, c, d) {
   const h = Math.sin(dLat / 2) ** 2 + Math.cos(rad(a)) * Math.cos(rad(c)) * Math.sin(dLng / 2) ** 2;
   return 2 * R * Math.asin(Math.sqrt(h));
 }
+
 export function nearestRegion(lat, lng, maxKm = 60) {
   if (lat == null || lng == null) return null;
   let best = null, bd = Infinity;
   for (const r of REGIONS) { const d = haversineKm(lat, lng, r.lat, r.lng); if (d < bd) { bd = d; best = r; } }
   return bd <= maxKm ? best : null;
+}
+
+// Reverse geocode via OpenStreetMap Nominatim with graceful fallback to nearest known region
+export async function reverseGeocodeNominatim(lat, lng) {
+  if (lat == null || lng == null) return null;
+  const n = nearestRegion(lat, lng);
+  try {
+    const res = await fetch(`https://nominatim.openstreetmap.org/reverse?format=json&lat=${encodeURIComponent(lat)}&lon=${encodeURIComponent(lng)}&zoom=10&addressdetails=1`, {
+      headers: {"User-Agent": "TraceX-FoodSafety-App/1.0 (contact: info@tracex.demo)", Accept: "application/json"},
+      signal: AbortSignal.timeout(4000),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const addr = data.address || {};
+      const district = addr.state_district || addr.district || addr.county || addr.city || addr.town || null;
+      const state = addr.state || null;
+      const postcode = addr.postcode || null;
+      const displayName = data.display_name || null;
+      return {
+        lat: Number(lat),
+        lng: Number(lng),
+        district,
+        state,
+        postcode,
+        displayName,
+        matchedRegion: n ? n.name : district,
+        matchedRegionKey: n ? n.key : null,
+      };
+    }
+  } catch {}
+  return n ? {lat: Number(lat), lng: Number(lng), district: n.name, state: "Maharashtra", postcode: null, displayName: n.name, matchedRegion: n.name, matchedRegionKey: n.key} : null;
 }

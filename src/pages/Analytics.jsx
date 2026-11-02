@@ -1,35 +1,232 @@
-import {useState} from "react";import {ResponsiveContainer,LineChart,Line,BarChart,Bar,XAxis,YAxis,Tooltip,CartesianGrid} from "recharts";import {Gauge,MessageSquareWarning,Boxes,Crosshair,MapPinned,X} from "lucide-react";
-import PageHeader from "../components/common/PageHeader.jsx";import HeatMap from "../components/map/HeatMap.jsx";import LoadingState from "../components/common/LoadingState.jsx";
-import useAsync from "../hooks/useAsync.js";import useMeta from "../hooks/useMeta.js";import {getAnalytics,getHotspots} from "../services/api.js";import {statusColor,statusLabel} from "../utils/status.js";import {ErrorState,Select,Empty,Notice} from "../components/common/Form.jsx";
-import {complaintIntensityColor,complaintSeverity,complaintSeverityLabel} from "../utils/complaintIntensity.js";
-import Page from "../components/ui/Page.jsx";import Panel from "../components/ui/Panel.jsx";import StatTile from "../components/ui/StatTile.jsx";import {ChartCard,axis,tooltip,grid,useChartAnim} from "../components/charts/ChartKit.jsx";
-const dateCls="border border-line rounded-full px-4 py-1.5 bg-white/70 text-sm focus:border-deep outline-none";
-export default function Analytics(){const {meta}=useMeta(),anim=useChartAnim(),[f,setF]=useState({category:"",status:"",from:"",to:""}),set=k=>e=>setF({...f,[k]:e.target.value}),active=f.category||f.status||f.from||f.to,badRange=f.from&&f.to&&f.from>f.to;
-  const {data:a,loading,error,reload}=useAsync(()=>getAnalytics(f),[f.category,f.status,f.from,f.to]),{data:hot,error:he}=useAsync(()=>getHotspots(f),[f.category,f.status,f.from,f.to]);
-  const total=a?a.statusCounts.reduce((s,c)=>s+c.n,0):0;
-  return <Page className="space-y-8"><PageHeader eyebrow="Insight" title="Analytics" sub="Patterns across batches, stages and regions. Complaints are unverified reports, so trends show where to look, not what happened."/>
-    <form className="panel px-5 py-4 flex flex-wrap items-end gap-x-5 gap-y-3" aria-label="Filters" onSubmit={e=>e.preventDefault()}>
-      <div><label htmlFor="fc" className="block text-xs text-muted mb-1">Category</label><Select id="fc" value={f.category} onChange={set("category")}><option value="">All categories</option>{meta&&Object.values(meta.categories).map(c=><option key={c.key} value={c.key}>{c.label}</option>)}</Select></div>
-      <div><label htmlFor="fs" className="block text-xs text-muted mb-1">Batch status</label><Select id="fs" value={f.status} onChange={set("status")}><option value="">All</option><option value="safe">Verified</option><option value="review">Under review</option><option value="suspicious">Suspected</option><option value="critical">Critical</option></Select></div>
-      <div><label htmlFor="ff" className="block text-xs text-muted mb-1">From</label><input id="ff" type="date" value={f.from} max={f.to||undefined} onChange={set("from")} className={dateCls}/></div>
-      <div><label htmlFor="ft" className="block text-xs text-muted mb-1">To</label><input id="ft" type="date" value={f.to} min={f.from||undefined} onChange={set("to")} className={dateCls}/></div>
-      {active&&<button type="button" className="inline-flex items-center gap-1 text-sm navlink text-deep pb-2" onClick={()=>setF({category:"",status:"",from:"",to:""})}><X size={14} aria-hidden/>Clear filters</button>}</form>
-    {badRange&&<Notice tone="error">The start date is after the end date, so nothing can match.</Notice>}
-    {error?<ErrorState error={error} onRetry={reload}/>:loading?<LoadingState variant="cards"/>:<>
-      <section aria-label="Operational metrics" className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
-        <StatTile label="Average quality" value={a.summary.averageQuality!=null?a.summary.averageQuality+"%":"—"} hint={`by ${a.bucket}`} icon={Gauge}/><StatTile label="Complaints" value={a.summary.complaints} hint="unverified reports" icon={MessageSquareWarning}/>
-        <StatTile label="Batches" value={a.summary.batches} icon={Boxes} hint={a.byCategory.length>1?a.byCategory.map(c=>`${c.label} ${c.batches}`).join(" · "):undefined}/><StatTile label="Most affected stage" value={a.summary.mostAffectedStage||"—"} icon={Crosshair} hint="By incident count"/></section>
-      <section aria-label="Trends" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        <ChartCard title="Quality trend" takeaway={a.qualityTrend.length?`Latest ${a.qualityTrend.at(-1).q}% across ${a.qualityTrend.length} ${a.bucket}s`:undefined} empty={!a.qualityTrend.length} label="Line chart of average quality score over time" table={{cols:["Period","Quality %"],rows:a.qualityTrend.map(d=>[d.m,d.q])}}>
-          <ResponsiveContainer><LineChart data={a.qualityTrend} margin={{left:-12,right:12,top:8}}><CartesianGrid {...grid}/><XAxis dataKey="m" {...axis}/><YAxis domain={[70,100]} {...axis} unit="%"/><Tooltip {...tooltip} formatter={v=>[v+"%","Quality"]}/><Line dataKey="q" name="Quality" stroke="#274245" strokeWidth={2.5} dot={{r:3,fill:"#DFD6AE",stroke:"#274245"}} {...anim}/></LineChart></ResponsiveContainer></ChartCard>
-        <ChartCard title={`Complaints per ${a.bucket}`} takeaway="Unverified consumer reports received" empty={!a.complaintTrend.length} label="Bar chart of complaints over time" table={{cols:["Period","Complaints"],rows:a.complaintTrend.map(d=>[d.m,d.n])}}>
-          <ResponsiveContainer><BarChart data={a.complaintTrend} margin={{left:-16,top:8}}><CartesianGrid {...grid}/><XAxis dataKey="m" {...axis}/><YAxis allowDecimals={false} {...axis}/><Tooltip {...tooltip}/><Bar dataKey="n" name="Complaints" fill="#274245" radius={[6,6,0,0]} {...anim}/></BarChart></ResponsiveContainer></ChartCard></section>
-      <section aria-label="Stages and status" className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-6">
-        <ChartCard title="Incidents by stage" takeaway="Where readings changed or complaints point" empty={!a.incidentsByStage.length} height={Math.max(180,a.incidentsByStage.length*44+30)} label="Horizontal bar chart of incidents per supply-chain stage" table={{cols:["Stage","Incidents"],rows:a.incidentsByStage.map(d=>[d.stage,d.n])}}>
-          <ResponsiveContainer><BarChart data={a.incidentsByStage} layout="vertical" margin={{left:8,right:16}}><XAxis type="number" allowDecimals={false} {...axis}/><YAxis type="category" dataKey="stage" width={110} {...axis}/><Tooltip {...tooltip}/><Bar dataKey="n" name="Incidents" fill="#DFD6AE" stroke="#274245" radius={[0,6,6,0]} {...anim}/></BarChart></ResponsiveContainer></ChartCard>
-        <Panel title="Batch status" desc="Share of batches by current status">{total?<><div role="img" aria-label={a.statusCounts.map(c=>`${statusLabel[c.s]} ${c.n}`).join(", ")} className="flex h-3 rounded-full overflow-hidden bg-sand">{a.statusCounts.filter(c=>c.n).map(c=><span key={c.s} style={{width:c.n/total*100+"%",background:statusColor[c.s]}}/>)}</div>
-          <ul className="mt-4 divide-y divide-line/70 text-sm">{a.statusCounts.map(c=><li key={c.s} className="py-2 flex items-center justify-between"><span className="inline-flex items-center gap-2"><span aria-hidden className="w-2.5 h-2.5 rounded-full" style={{background:statusColor[c.s]}}/>{statusLabel[c.s]}</span><span className="tabular-nums text-muted"><b className="text-ink font-medium">{c.n}</b> · {Math.round(c.n/total*100)}%</span></li>)}</ul></>:<Empty>No batches for these filters.</Empty>}</Panel></section></>}
-    <Panel id="regional" icon={MapPinned} title="Regional pattern" desc="Complaint clusters by region and the stage requiring investigation. Internal to reviewers and administrators. Not a finding of contamination."
-      actions={<ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted" aria-label="Complaint-count intensity scale">{Object.entries(complaintSeverityLabel).map(([k,l])=><li key={k} className="inline-flex items-center gap-1.5"><span aria-hidden className="w-2.5 h-2.5 rounded-full" style={{background:complaintIntensityColor(({safe:1,review:3,suspicious:5,critical:10})[k])}}/>{l}</li>)}</ul>}>
-      {he?<ErrorState error={he}/>:<div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-6"><div className="h-[380px] rounded-2xl overflow-hidden border border-line"><HeatMap hotspots={hot||[]}/></div>
-        <div className="overflow-x-auto">{hot?.length?<table className="tbl"><thead><tr><th>Region</th><th>Reports</th><th>Intensity</th></tr></thead><tbody>{[...hot].sort((x,y)=>y.reports-x.reports).map(h=>{const severity=complaintSeverity(h.reports);return <tr key={h.region+h.lat}><td className="font-medium text-deep">{h.region}<span className="block text-xs font-normal text-muted">{h.stage?`Stage: ${h.stage}`:`${h.batches} batch${h.batches===1?"":"es"}`}</span></td><td className="tabular-nums">{h.reports}<span className="block text-xs text-muted">{h.lab} lab-confirmed</span></td><td><span className="inline-flex items-center gap-1.5 text-sm"><span aria-hidden className="w-2.5 h-2.5 rounded-full" style={{background:complaintIntensityColor(h.reports)}}/>{complaintSeverityLabel[severity]}</span></td></tr>})}</tbody></table>:hot&&<Empty icon={MapPinned}>No complaint locations match these filters.</Empty>}</div></div>}</Panel></Page>}
+import {useState} from "react";
+import {ResponsiveContainer, LineChart, Line, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid} from "recharts";
+import {Gauge, MessageSquareWarning, Boxes, Crosshair, MapPinned, X, Network} from "lucide-react";
+import PageHeader from "../components/common/PageHeader.jsx";
+import HeatMap from "../components/map/HeatMap.jsx";
+import LoadingState from "../components/common/LoadingState.jsx";
+import useAsync from "../hooks/useAsync.js";
+import useMeta from "../hooks/useMeta.js";
+import {getAnalytics, getHotspots, getStaffCorrelations} from "../services/api.js";
+import {statusColor, statusLabel} from "../utils/status.js";
+import {ErrorState, Select, Empty, Notice} from "../components/common/Form.jsx";
+import {complaintIntensityColor, complaintSeverity, complaintSeverityLabel} from "../utils/complaintIntensity.js";
+import Page from "../components/ui/Page.jsx";
+import Panel from "../components/ui/Panel.jsx";
+import StatTile from "../components/ui/StatTile.jsx";
+import {ChartCard, axis, tooltip, grid, useChartAnim} from "../components/charts/ChartKit.jsx";
+
+const dateCls = "border border-line rounded-full px-4 py-1.5 bg-white/70 text-sm focus:border-deep outline-none";
+
+export default function Analytics() {
+  const {meta} = useMeta(), anim = useChartAnim(), [f, setF] = useState({category: "", status: "", from: "", to: ""});
+  const set = k => e => setF({...f, [k]: e.target.value});
+  const active = f.category || f.status || f.from || f.to, badRange = f.from && f.to && f.from > f.to;
+
+  const {data: a, loading, error, reload} = useAsync(() => getAnalytics(f), [f.category, f.status, f.from, f.to]);
+  const {data: hot, error: he} = useAsync(() => getHotspots(f), [f.category, f.status, f.from, f.to]);
+  const {data: corr} = useAsync(() => getStaffCorrelations(f), [f.category, f.status, f.from, f.to]);
+
+  const total = a ? a.statusCounts.reduce((s, c) => s + c.n, 0) : 0;
+
+  return (
+    <Page className="space-y-8">
+      <PageHeader
+        eyebrow="Insight"
+        title="Analytics & Correlation Graph"
+        sub="Patterns across batches, stages and regions. Trace problem origins and geographic issue correlations across affected batches."
+      />
+      <form className="panel px-5 py-4 flex flex-wrap items-end gap-x-5 gap-y-3" aria-label="Filters" onSubmit={e => e.preventDefault()}>
+        <div>
+          <label htmlFor="fc" className="block text-xs text-muted mb-1">Category</label>
+          <Select id="fc" value={f.category} onChange={set("category")}>
+            <option value="">All categories</option>
+            {meta && Object.values(meta.categories).map(c => <option key={c.key} value={c.key}>{c.label}</option>)}
+          </Select>
+        </div>
+        <div>
+          <label htmlFor="fs" className="block text-xs text-muted mb-1">Batch status</label>
+          <Select id="fs" value={f.status} onChange={set("status")}>
+            <option value="">All</option>
+            <option value="safe">Verified</option>
+            <option value="review">Under review</option>
+            <option value="suspicious">Suspected</option>
+            <option value="critical">Critical</option>
+          </Select>
+        </div>
+        <div>
+          <label htmlFor="ff" className="block text-xs text-muted mb-1">From</label>
+          <input id="ff" type="date" value={f.from} max={f.to || undefined} onChange={set("from")} className={dateCls} />
+        </div>
+        <div>
+          <label htmlFor="ft" className="block text-xs text-muted mb-1">To</label>
+          <input id="ft" type="date" value={f.to} min={f.from || undefined} onChange={set("to")} className={dateCls} />
+        </div>
+        {active && (
+          <button type="button" className="inline-flex items-center gap-1 text-sm navlink text-deep pb-2" onClick={() => setF({category: "", status: "", from: "", to: ""})}>
+            <X size={14} aria-hidden /> Clear filters
+          </button>
+        )}
+      </form>
+
+      {badRange && <Notice tone="error">The start date is after the end date, so nothing can match.</Notice>}
+      {error ? (
+        <ErrorState error={error} onRetry={reload} />
+      ) : loading ? (
+        <LoadingState variant="cards" />
+      ) : (
+        <>
+          <section aria-label="Operational metrics" className="grid grid-cols-2 lg:grid-cols-4 gap-3 md:gap-4">
+            <StatTile label="Average quality" value={a.summary.averageQuality != null ? a.summary.averageQuality + "%" : "—"} hint={`by ${a.bucket}`} icon={Gauge} />
+            <StatTile label="Complaints" value={a.summary.complaints} hint="unverified reports" icon={MessageSquareWarning} />
+            <StatTile label="Batches" value={a.summary.batches} icon={Boxes} hint={a.byCategory.length > 1 ? a.byCategory.map(c => `${c.label} ${c.batches}`).join(" · ") : undefined} />
+            <StatTile label="Most affected stage" value={a.summary.mostAffectedStage || "—"} icon={Crosshair} hint="By incident count" />
+          </section>
+
+          <section aria-label="Trends" className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+            <ChartCard title="Quality trend" takeaway={a.qualityTrend.length ? `Latest ${a.qualityTrend.at(-1).q}% across ${a.qualityTrend.length} ${a.bucket}s` : undefined} empty={!a.qualityTrend.length} label="Line chart of average quality score over time" table={{cols: ["Period", "Quality %"], rows: a.qualityTrend.map(d => [d.m, d.q])}}>
+              <ResponsiveContainer>
+                <LineChart data={a.qualityTrend} margin={{left: -12, right: 12, top: 8}}>
+                  <CartesianGrid {...grid} />
+                  <XAxis dataKey="m" {...axis} />
+                  <YAxis domain={[70, 100]} {...axis} unit="%" />
+                  <Tooltip {...tooltip} formatter={v => [v + "%", "Quality"]} />
+                  <Line dataKey="q" name="Quality" stroke="#274245" strokeWidth={2.5} dot={{r: 3, fill: "#DFD6AE", stroke: "#274245"}} {...anim} />
+                </LineChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <ChartCard title={`Complaints per ${a.bucket}`} takeaway="Unverified consumer reports received" empty={!a.complaintTrend.length} label="Bar chart of complaints over time" table={{cols: ["Period", "Complaints"], rows: a.complaintTrend.map(d => [d.m, d.n])}}>
+              <ResponsiveContainer>
+                <BarChart data={a.complaintTrend} margin={{left: -16, top: 8}}>
+                  <CartesianGrid {...grid} />
+                  <XAxis dataKey="m" {...axis} />
+                  <YAxis allowDecimals={false} {...axis} />
+                  <Tooltip {...tooltip} />
+                  <Bar dataKey="n" name="Complaints" fill="#274245" radius={[6, 6, 0, 0]} {...anim} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          </section>
+
+          <section aria-label="Stages and status" className="grid grid-cols-1 lg:grid-cols-[3fr_2fr] gap-6">
+            <ChartCard title="Incidents by stage" takeaway="Where readings changed or complaints point" empty={!a.incidentsByStage.length} height={Math.max(180, a.incidentsByStage.length * 44 + 30)} label="Horizontal bar chart of incidents per supply-chain stage" table={{cols: ["Stage", "Incidents"], rows: a.incidentsByStage.map(d => [d.stage, d.n])}}>
+              <ResponsiveContainer>
+                <BarChart data={a.incidentsByStage} layout="vertical" margin={{left: 8, right: 16}}>
+                  <XAxis type="number" allowDecimals={false} {...axis} />
+                  <YAxis type="category" dataKey="stage" width={110} {...axis} />
+                  <Tooltip {...tooltip} />
+                  <Bar dataKey="n" name="Incidents" fill="#DFD6AE" stroke="#274245" radius={[0, 6, 6, 0]} {...anim} />
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+
+            <Panel title="Batch status" desc="Share of batches by current status">
+              {total ? (
+                <>
+                  <div role="img" aria-label={a.statusCounts.map(c => `${statusLabel[c.s]} ${c.n}`).join(", ")} className="flex h-3 rounded-full overflow-hidden bg-sand">
+                    {a.statusCounts.filter(c => c.n).map(c => <span key={c.s} style={{width: c.n / total * 100 + "%", background: statusColor[c.s]}} />)}
+                  </div>
+                  <ul className="mt-4 divide-y divide-line/70 text-sm">
+                    {a.statusCounts.map(c => (
+                      <li key={c.s} className="py-2 flex items-center justify-between">
+                        <span className="inline-flex items-center gap-2">
+                          <span aria-hidden className="w-2.5 h-2.5 rounded-full" style={{background: statusColor[c.s]}} />
+                          {statusLabel[c.s]}
+                        </span>
+                        <span className="tabular-nums text-muted">
+                          <b className="text-ink font-medium">{c.n}</b> · {Math.round(c.n / total * 100)}%
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              ) : (
+                <Empty>No batches for these filters.</Empty>
+              )}
+            </Panel>
+          </section>
+        </>
+      )}
+
+      {/* Regional Pattern & Batch Correlation Network */}
+      <Panel
+        id="regional"
+        icon={MapPinned}
+        title="Regional Problem Patterns & Issue Correlation Graph"
+        desc="Clusters of complaints mapped with supply-chain origins. Dashed arcs link regions reporting the same problem batch; solid blue arcs show manufacturing distribution vectors."
+        actions={
+          <ul className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted" aria-label="Complaint-count intensity scale">
+            {Object.entries(complaintSeverityLabel).map(([k, l]) => (
+              <li key={k} className="inline-flex items-center gap-1.5">
+                <span aria-hidden className="w-2.5 h-2.5 rounded-full" style={{background: complaintIntensityColor(({safe: 1, review: 3, suspicious: 5, critical: 10})[k])}} />
+                {l}
+              </li>
+            ))}
+          </ul>
+        }
+      >
+        {he ? (
+          <ErrorState error={he} />
+        ) : (
+          <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-6">
+            <div className="h-[420px] rounded-2xl overflow-hidden border border-line">
+              <HeatMap hotspots={hot || []} correlations={corr} initialConnect={true} />
+            </div>
+            <div className="overflow-x-auto space-y-4">
+              {corr?.links?.length > 0 && (
+                <div className="p-3 bg-paper rounded-xl border border-line text-xs">
+                  <div className="flex items-center gap-1.5 font-semibold text-deep mb-2">
+                    <Network size={14} className="text-deep" />
+                    <span>Active Cross-Region Correlations ({corr.links.filter(l => l.type === "batch_correlation").length})</span>
+                  </div>
+                  <ul className="space-y-1 text-muted">
+                    {corr.links.filter(l => l.type === "batch_correlation").slice(0, 4).map(l => (
+                      <li key={l.id} className="border-b border-line/60 pb-1 last:border-0">
+                        <span className="font-medium text-deep">{l.fromName}</span> ↔ <span className="font-medium text-deep">{l.toName}</span>
+                        <span className="block text-[11px]">Batch: <span className="font-mono text-deep font-semibold">{l.batchId}</span> ({l.product}) · {l.jointReports} joint reports</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+              {hot?.length ? (
+                <table className="tbl">
+                  <thead>
+                    <tr><th>Region</th><th>Reports</th><th>Intensity</th></tr>
+                  </thead>
+                  <tbody>
+                    {[...hot].sort((x, y) => y.reports - x.reports).map(h => {
+                      const severity = complaintSeverity(h.reports);
+                      return (
+                        <tr key={h.region + h.lat}>
+                          <td className="font-medium text-deep">
+                            {h.region}
+                            <span className="block text-xs font-normal text-muted">
+                              {h.stage ? `Stage: ${h.stage}` : `${h.batches} batch${h.batches === 1 ? "" : "es"}`}
+                            </span>
+                          </td>
+                          <td className="tabular-nums">
+                            {h.reports}
+                            <span className="block text-xs text-muted">{h.lab} lab-confirmed</span>
+                          </td>
+                          <td>
+                            <span className="inline-flex items-center gap-1.5 text-sm">
+                              <span aria-hidden className="w-2.5 h-2.5 rounded-full" style={{background: complaintIntensityColor(h.reports)}} />
+                              {complaintSeverityLabel[severity]}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              ) : (
+                hot && <Empty icon={MapPinned}>No complaint locations match these filters.</Empty>
+              )}
+            </div>
+          </div>
+        )}
+      </Panel>
+    </Page>
+  );
+}

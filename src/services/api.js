@@ -11,6 +11,9 @@ export const submitComplaint = (form, key) => request("/public/complaints", {met
 export const getComplaintStatus = code => request("/public/complaints/" + encodeURIComponent(code));
 export const getPublicHeatmap = f => request("/public/heatmap" + qs(f));
 export const getMyComplaints = () => request("/public/my-complaints");
+export const lookupBarcode = code => request("/public/barcode-lookup/" + encodeURIComponent(code));
+export const reverseGeocode = (lat, lng) => request("/public/reverse-geocode" + qs({lat, lng}));
+export const getCorrelations = f => request("/public/correlations" + qs(f));
 
 // session
 export const login = (email, password) => request("/auth/login", {method: "POST", body: {email, password}});
@@ -29,6 +32,7 @@ export const getComplaints = f => request("/complaints" + qs(f));
 export const getComplaintSummary = () => request("/complaints/summary");
 export const getAnalytics = f => request("/analytics" + qs(f));
 export const getHotspots = f => request("/analytics/hotspots" + qs(f));
+export const getStaffCorrelations = f => request("/analytics/correlations" + qs(f));
 export const getInvestigations = f => request("/investigations" + qs(f));
 export const getInvestigationById = id => request("/investigations/" + id).catch(e => { if (e.status === 404) return null; throw e; });
 export const runTraceability = (id, simulate) => request(`/investigations/${id}/traceability`, {method: "POST", body: {simulate}});
@@ -56,6 +60,9 @@ export const setThreshold = (scope, body) => request("/admin/thresholds/" + scop
 export const removeThreshold = scope => request("/admin/thresholds/" + scope, {method: "DELETE"});
 export const getIntegrations = () => request("/admin/integrations");
 export const getAudit = f => request("/admin/audit" + qs(f));
+export const generateScenario = scenario => request("/admin/scenarios/generate", {method: "POST", body: {scenario}});
+export const clearScenarios = () => request("/admin/scenarios", {method: "DELETE"});
 
 // external supply-chain data provider
 export const postProviderRecords = (batchId, records) => request(`/provider/supply-chain/${encodeURIComponent(batchId)}/records`, {method: "POST", body: {records}});
+export const submitProviderRecords = postProviderRecords;

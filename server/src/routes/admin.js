@@ -9,6 +9,7 @@ import {thresholdSchema, userCreateSchema, userPatchSchema} from "../schemas.js"
 import {listThresholds, setThreshold, removeThreshold} from "../services/thresholds.js";
 import {providerStatus} from "../providers/supplyChain/index.js";
 import {adapterStatus} from "../providers/fssai/index.js";
+import {generateScenario, clearSyntheticScenarios} from "../services/synthetic-generator.js";
 
 const r = Router();
 r.get("/thresholds", requireRole("admin", "reviewer"), ah(async (_q, res) => res.json(await listThresholds())));
@@ -35,11 +36,26 @@ r.patch("/users/:id", requireRole("admin"), ah(async (req, res) => {
   res.json(publicUser(await User.findById(id).lean()));
 }));
 
+r.post("/scenarios/generate", requireRole("admin"), ah(async (req, res) => {
+  const scenario = req.body?.scenario || "dairy_coldchain";
+  const result = await generateScenario(scenario);
+  await audit(req.user, "scenario.generated", "batch", result.batchId, {scenario, complaints: result.complaintsGenerated});
+  res.status(201).json(result);
+}));
+
+r.delete("/scenarios", requireRole("admin"), ah(async (_q, res) => {
+  const result = await clearSyntheticScenarios();
+  await audit(req.user, "scenarios.cleared", "scenario", "all", result);
+  res.json(result);
+}));
+
 r.get("/integrations", requireRole("admin"), ah(async (_q, res) => res.json({
   supplyChain: await providerStatus(), fssai: adapterStatus(),
-  ocr: {available: false, note: "No OCR service is integrated. Consumers use manual entry; a browser barcode reader is used where the browser supports it."},
-  notifications: {configured: false, note: "No email/SMS provider is configured. Sample requests are shown to consumers on their complaint status page only."},
-  authentication: {mode: "local", note: "Local accounts (bcrypt) with a signed, httpOnly session cookie. No external identity provider is configured."},
+  ocr: {available: false, note: "No server-side OCR service is integrated. Client-side Tesseract.js is enabled in the browser."},
+  openFoodFacts: {available: true, note: "Open Food Facts API connected for universal barcode/GTIN discovery."},
+  reverseGeocode: {available: true, engine: "OpenStreetMap Nominatim", note: "Nominatim connected for reverse geocoding GPS coordinates to districts/pincodes."},
+  notifications: {configured: false, note: "Sample requests are shown to consumers on their complaint status page."},
+  authentication: {mode: "local", note: "Local accounts (bcrypt) with a signed, httpOnly session cookie."},
   database: {engine: "MongoDB", file: `database “${dbName()}”${config.mongoTransactions ? ", transactions on" : ", transactions off (standalone)"}`},
   simulationEnabled: config.allowSimulation, https: {enforced: config.forceHttps, secureCookies: config.cookieSecure},
 })));

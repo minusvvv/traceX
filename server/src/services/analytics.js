@@ -113,3 +113,145 @@ export async function dashboardSummary() {
     events: events.filter(e => e.at).sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10),
   };
 }
+
+
+// Graph & connect problem areas flagging issues for the same batch or product.
+// Computes spatial & logical correlation graph:
+// - Nodes: Facility/Factory origins + Regional complaint clusters
+// - Links:
+//   1. Origin -> Region (Transit distribution vectors carrying the problem batch)
+//   2. Region <-> Region (Inter-cluster correlation: locations reporting the same batch or same product)
+export async function issueCorrelations({category, batchId, productId} = {}) {
+  const q = {region: {$ne: null}};
+  if (batchId) q.batch_id = String(batchId).toUpperCase();
+  if (productId) q.product_id = productId;
+
+  let complaints = await Complaint.find(q).select("batch_id product_id region lat lng created_at").lean();
+  if (category) {
+    const cm = await categoryOf(complaints);
+    complaints = complaints.filter(c => cm.get(c.product_id) === category);
+  }
+
+  // Load affected batches
+  const batchIds = [...new Set(complaints.map(c => c.batch_id).filter(Boolean))];
+  const batches = await loadBatches({ids: batchIds});
+  const batchMap = new Map(batches.map(b => [b.id, b]));
+
+  // Regional nodes
+  const regionMap = new Map();
+  for (const c of complaints) {
+    const r = c.region;
+    const g = regionMap.get(r) || regionMap.set(r, {
+      id: `region-${r}`,
+      type: "cluster",
+      region: r,
+      latSum: 0,
+      lngSum: 0,
+      reports: 0,
+      batchSet: new Set(),
+      productSet: new Set(),
+    }).get(r);
+    g.reports++;
+    g.latSum += c.lat || 0;
+    g.lngSum += c.lng || 0;
+    if (c.batch_id) g.batchSet.add(c.batch_id);
+    if (c.product_id) g.productSet.add(c.product_id);
+  }
+
+  const nodes = [];
+  const facilityMap = new Map();
+
+  for (const g of regionMap.values()) {
+    const lat = g.reports ? g.latSum / g.reports : 0;
+    const lng = g.reports ? g.lngSum / g.reports : 0;
+    nodes.push({
+      id: g.id,
+      name: g.region,
+      type: "cluster",
+      lat,
+      lng,
+      reports: g.reports,
+      batches: [...g.batchSet],
+      products: [...g.productSet],
+      severity: complaintSeverity(g.reports),
+    });
+  }
+
+  // Origin / Facility nodes and distribution links
+  const links = [];
+  const interRegionPairs = new Set();
+
+  for (const b of batches) {
+    const origin = b.route.find(r => r.side === "manufacturer" || r.kind === "processing" || r.kind === "source") || b.route[0];
+    if (origin && origin.lat && origin.lng) {
+      const facId = `fac-${b.facility || origin.place}`;
+      if (!facilityMap.has(facId)) {
+        facilityMap.set(facId, true);
+        nodes.push({
+          id: facId,
+          name: b.facility || origin.place,
+          type: "facility",
+          lat: origin.lat,
+          lng: origin.lng,
+          reports: 0,
+          batches: [b.id],
+          products: [b.productId],
+          severity: b.status,
+        });
+      }
+
+      // Link facility -> each region receiving this batch that filed complaints
+      const regionsWithBatch = [...regionMap.values()].filter(g => g.batchSet.has(b.id));
+      for (const r of regionsWithBatch) {
+        const rLat = r.latSum / r.reports, rLng = r.lngSum / r.reports;
+        links.push({
+          id: `link-${facId}-${r.id}-${b.id}`,
+          type: "distribution_flow",
+          from: [origin.lat, origin.lng],
+          to: [rLat, rLng],
+          fromName: b.facility || origin.place,
+          toName: r.region,
+          batchId: b.id,
+          product: b.product,
+          status: b.status,
+          complaints: r.reports,
+        });
+      }
+
+      // Inter-regional links: Connect regions that share this contaminated/flagged batch
+      for (let i = 0; i < regionsWithBatch.length; i++) {
+        for (let j = i + 1; j < regionsWithBatch.length; j++) {
+          const r1 = regionsWithBatch[i], r2 = regionsWithBatch[j];
+          const pairKey = [r1.region, r2.region, b.id].sort().join("::");
+          if (!interRegionPairs.has(pairKey)) {
+            interRegionPairs.add(pairKey);
+            links.push({
+              id: `corr-${r1.region}-${r2.region}-${b.id}`,
+              type: "batch_correlation",
+              from: [r1.latSum / r1.reports, r1.lngSum / r1.reports],
+              to: [r2.latSum / r2.reports, r2.lngSum / r2.reports],
+              fromName: r1.region,
+              toName: r2.region,
+              batchId: b.id,
+              product: b.product,
+              status: b.status,
+              jointReports: r1.reports + r2.reports,
+              relation: `Both regions received batch ${b.id}`,
+            });
+          }
+        }
+      }
+    }
+  }
+
+  return {
+    nodes,
+    links,
+    summary: {
+      totalClusters: nodes.filter(n => n.type === "cluster").length,
+      totalFacilities: nodes.filter(n => n.type === "facility").length,
+      correlationLinks: links.filter(l => l.type === "batch_correlation").length,
+      distributionLinks: links.filter(l => l.type === "distribution_flow").length,
+    },
+  };
+}
