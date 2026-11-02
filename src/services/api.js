@@ -11,6 +11,9 @@ export const submitComplaint = (form, key) => request("/public/complaints", {met
 export const getComplaintStatus = code => request("/public/complaints/" + encodeURIComponent(code));
 export const getPublicHeatmap = f => request("/public/heatmap" + qs(f));
 export const getMyComplaints = () => request("/public/my-complaints");
+export const getEnhancedComplaintMap = f => request("/public/complaint-map" + qs(f));
+export const getPublicCorrelations = f => request("/public/correlations" + qs(f));
+export const getPublicComplaints = f => request("/public/complaints" + qs(f));
 
 // session
 export const login = (email, password) => request("/auth/login", {method: "POST", body: {email, password}});

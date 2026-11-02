@@ -18,7 +18,7 @@ export default function ConsumerComplaint(){const {t}=useT(),[sp]=useSearchParam
   const review=e=>{e.preventDefault();const v=validate();setErr(v);if(!Object.keys(v).length)setStep("review")};
   const submit=async()=>{if(busy)return;setBusy(true);setTop(null);const fd=new FormData();fd.append("description",f.description.trim());["identifier","productText","regionKey","contact"].forEach(k=>f[k].trim()&&fd.append(k,f[k].trim()));fd.append("identifierSource",src);fd.append("lang",document.documentElement.lang==="hi"?"hi":"en");
     if(loc){fd.append("lat",loc.lat);fd.append("lng",loc.lng)}if(img)fd.append("productImage",img);photos.forEach(p=>fd.append("photos",p));
-    try{setDone(await submitComplaint(fd,key.current))}catch(x){setErr(x.fields||{});setTop(x.message||t("report.err.server"));setStep("edit")}finally{setBusy(false)}};
+    try{const res = await submitComplaint(fd,key.current);setDone(res);if(typeof window!=="undefined"){window.dispatchEvent(new CustomEvent("tracex:complaint-submitted",{detail:res}));try{localStorage.setItem("tracex_last_complaint",Date.now().toString());}catch{}}}catch(x){setErr(x.fields||{});setTop(x.message||t("report.err.server"));setStep("edit")}finally{setBusy(false)}};
   const startSubmit=()=>{if(user?.role==="consumer")submit();else{setAuthMode("signup");setAuthErr(null)}};
   const authenticateAndSubmit=async e=>{e.preventDefault();setAuthErr(null);setAuthBusy(true);
     try{if(authMode==="signup")await registerConsumer({name:account.name.trim(),email:account.email.trim(),password:account.password});else await consumerLogin(account.email.trim(),account.password);setAuthMode(null);if(step==="review")await submit()}

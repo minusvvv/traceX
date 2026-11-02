@@ -14,6 +14,11 @@ body{background:#F5F2E9;color:#203437;font-family:Inter,system-ui,sans-serif;-we
 .leaflet-tile-pane{filter:grayscale(1) sepia(.18) hue-rotate(120deg) saturate(.7) brightness(1.02) contrast(.9)}
 .leaflet-popup-content-wrapper{background:#F5F2E9;color:#203437;border-radius:12px;box-shadow:0 6px 24px #27424522}
 .leaflet-popup-tip{background:#F5F2E9}
+.leaflet-tooltip{background:#F5F2E9!important;color:#203437!important;border:1px solid #D9D3BF!important;border-radius:12px!important;box-shadow:0 6px 24px #27424522!important;padding:0!important;overflow:hidden}
+.leaflet-tooltip-top:before{border-top-color:#F5F2E9!important}
+.leaflet-tooltip-bottom:before{border-bottom-color:#F5F2E9!important}
+.leaflet-tooltip-left:before{border-left-color:#F5F2E9!important}
+.leaflet-tooltip-right:before{border-right-color:#F5F2E9!important}
 .leaflet-control-attribution{background:#F5F2E9cc!important;color:#718080}
 .route-anim{stroke-dasharray:6 10;animation:dash 1.4s linear infinite}
 @keyframes dash{to{stroke-dashoffset:-16}}

@@ -9,7 +9,7 @@ import {requireRole} from "../auth.js";
 import {categoryMeta, categoryKeys} from "../domain/categories.js";
 import {loadBatch, loadBatches, resolveIdentifier, toPublic} from "../domain/batches.js";
 import {createComplaint, publicComplaintView, listMyComplaints} from "../services/complaints.js";
-import {publicHeatmap} from "../services/analytics.js";
+import {publicHeatmap, enhancedComplaintMap, publicCorrelations, publicComplaintsList} from "../services/analytics.js";
 import {uploader, IMAGE_TYPES, filePath, attachmentData} from "../uploads.js";
 import {REGIONS} from "../geo.js";
 
@@ -65,6 +65,31 @@ r.get("/complaint-attachments/:id", ah(async (req, res) => {
 r.get("/heatmap", ah(async (req, res) => {
   const category = categoryKeys.includes(req.query.category) ? req.query.category : undefined;
   const days = [7, 30, 90, 365].includes(+req.query.days) ? +req.query.days : 90;
-  res.json(await publicHeatmap({category, days}));
+  const minReports = req.query.minReports ? +req.query.minReports : undefined;
+  res.json(await publicHeatmap({category, days, minReports}));
+}));
+r.get("/complaints", ah(async (req, res) => {
+  const category = categoryKeys.includes(req.query.category) ? req.query.category : undefined;
+  const days = [7, 30, 90, 365].includes(+req.query.days) ? +req.query.days : 90;
+  const batchId = req.query.batchId ? String(req.query.batchId).toUpperCase() : undefined;
+  const userId = req.query.userId || undefined;
+  const city = req.query.city || undefined;
+  res.json(await publicComplaintsList({category, days, batchId, userId, city}));
+}));
+r.get("/correlations", ah(async (req, res) => {
+  const category = categoryKeys.includes(req.query.category) ? req.query.category : undefined;
+  const days = [7, 30, 90, 365].includes(+req.query.days) ? +req.query.days : 90;
+  const batchId = req.query.batchId ? String(req.query.batchId).toUpperCase() : undefined;
+  const userId = req.query.userId || undefined;
+  const city = req.query.city || undefined;
+  res.json(await publicCorrelations({category, days, batchId, userId, city}));
+}));
+r.get("/complaint-map", ah(async (req, res) => {
+  const category = categoryKeys.includes(req.query.category) ? req.query.category : undefined;
+  const days = [7, 30, 90, 365].includes(+req.query.days) ? +req.query.days : 90;
+  const batchId = req.query.batchId ? String(req.query.batchId).toUpperCase() : undefined;
+  const userId = req.query.userId || undefined;
+  const city = req.query.city || undefined;
+  res.json(await enhancedComplaintMap({category, days, batchId, userId, city}));
 }));
 export default r;

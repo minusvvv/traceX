@@ -40,6 +40,7 @@ export async function createComplaint(input, files = {}, actor = null) {
     const m = await Product.find({name: new RegExp("^" + input.productText.trim().replace(/[.*+?^${}()|[\]\\]/g, "\\$&") + "$", "i")}).select("_id").lean();
     if (m.length === 1) productId = m[0]._id;
   }
+  // Allow multiple complaints: DO NOT block or restrict users from submitting multiple complaints for the same product or batch
   let region = null, lat = null, lng = null;
   if (input.lat != null && input.lng != null) {
     lat = Math.round(input.lat * 1000) / 1000; lng = Math.round(input.lng * 1000) / 1000;
