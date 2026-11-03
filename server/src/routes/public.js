@@ -74,7 +74,8 @@ r.get("/complaints", ah(async (req, res) => {
   const batchId = req.query.batchId ? String(req.query.batchId).toUpperCase() : undefined;
   const userId = req.query.userId || undefined;
   const city = req.query.city || undefined;
-  res.json(await publicComplaintsList({category, days, batchId, userId, city}));
+  const viewerUserId = req.user?.id || req.query.viewerUserId || undefined;
+  res.json(await publicComplaintsList({category, days, batchId, userId, city, viewerUserId}));
 }));
 r.get("/correlations", ah(async (req, res) => {
   const category = categoryKeys.includes(req.query.category) ? req.query.category : undefined;
@@ -82,7 +83,8 @@ r.get("/correlations", ah(async (req, res) => {
   const batchId = req.query.batchId ? String(req.query.batchId).toUpperCase() : undefined;
   const userId = req.query.userId || undefined;
   const city = req.query.city || undefined;
-  res.json(await publicCorrelations({category, days, batchId, userId, city}));
+  const viewerUserId = req.user?.id || req.query.viewerUserId || undefined;
+  res.json(await publicCorrelations({category, days, batchId, userId, city, viewerUserId}));
 }));
 r.get("/complaint-map", ah(async (req, res) => {
   const category = categoryKeys.includes(req.query.category) ? req.query.category : undefined;
@@ -90,6 +92,7 @@ r.get("/complaint-map", ah(async (req, res) => {
   const batchId = req.query.batchId ? String(req.query.batchId).toUpperCase() : undefined;
   const userId = req.query.userId || undefined;
   const city = req.query.city || undefined;
-  res.json(await enhancedComplaintMap({category, days, batchId, userId, city}));
+  const viewerUserId = req.user?.id || req.query.viewerUserId || undefined;
+  res.json(await enhancedComplaintMap({category, days, batchId, userId, city, viewerUserId}));
 }));
 export default r;

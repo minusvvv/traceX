@@ -175,3 +175,31 @@ test("Requirement 5: Multi-Level Map Views & Filters (City, My Complaints, Categ
   assert.ok(heatRes.json.cells.length > 0);
   assert.ok(heatRes.json.cells.some(c => c.reports >= 1));
 });
+
+test("Requirement 6: View report privacy - only own complaints expose trackingCode and isOwn=true, guests have no own report access", async () => {
+  // Guest view (no session / no sign in)
+  const guestRes = await call("GET", "/public/correlations?days=90");
+  assert.equal(guestRes.status, 200);
+  assert.ok(guestRes.json.complaints.length > 0, "Complaints exist in guest view");
+  for (const c of guestRes.json.complaints) {
+    assert.equal(c.isOwn, false, "Guest requests must have isOwn=false for all complaints");
+    assert.equal(c.trackingCode, undefined, "Guest requests must NOT expose trackingCode of complaints");
+  }
+
+  // Authenticated consumer view (via cookie)
+  const authRes = await call("GET", "/public/correlations?days=90", {cookie: consumerCookie});
+  assert.equal(authRes.status, 200);
+  const myComplaints = authRes.json.complaints.filter(c => c.isOwn);
+  const otherComplaints = authRes.json.complaints.filter(c => !c.isOwn);
+
+  assert.ok(myComplaints.length >= 3, "Consumer must see their own 3 submitted complaints flagged isOwn=true");
+  for (const c of myComplaints) {
+    assert.equal(c.isOwn, true);
+    assert.ok(c.trackingCode, "Consumer's own complaints must provide trackingCode to view report");
+  }
+
+  for (const c of otherComplaints) {
+    assert.equal(c.isOwn, false);
+    assert.equal(c.trackingCode, undefined, "Other complaints must not expose trackingCode");
+  }
+});

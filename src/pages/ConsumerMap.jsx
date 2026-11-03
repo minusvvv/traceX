@@ -16,7 +16,7 @@ import LoadingState from "../components/common/LoadingState.jsx";
 import {ErrorState, Select, Empty} from "../components/common/Form.jsx";
 import {useT} from "../i18n/index.jsx";
 import {useAuth} from "../auth/AuthContext.jsx";
-import {fmtDateTime} from "../utils/formatters.js";
+import {fmtDateTime, fmtDate, fmtAgo} from "../utils/formatters.js";
 
 // Distance helper to determine nearest region from coordinates
 function getNearestRegion(lat, lng, regions = []) {
@@ -48,6 +48,7 @@ export default function ConsumerMap() {
   const [cityInput, setCityInput] = useState("");
   const [lastRefreshed, setLastRefreshed] = useState(Date.now());
   const [isRefreshing, setIsRefreshing] = useState(false);
+  const [highlightedBatchId, setHighlightedBatchId] = useState(null);
 
   // Auto-detect consumer's city on mount
   useEffect(() => {
@@ -87,13 +88,14 @@ export default function ConsumerMap() {
     if (selectedCategory) params.category = selectedCategory;
     if (filterCityOnly && activeCity) params.city = activeCity;
     if (filterMineOnly && user?.id) params.userId = user.id;
+    if (user?.id) params.viewerUserId = user.id;
     return params;
   }, [days, selectedCategory, filterCityOnly, activeCity, filterMineOnly, user?.id]);
 
   // Main map query (only actual filter dimensions in deps to prevent clearing data on background sync)
   const mapQuery = useAsync(
     () => getPublicCorrelations(queryParams),
-    [queryParams.category, queryParams.days, queryParams.city, queryParams.userId]
+    [queryParams.category, queryParams.days, queryParams.city, queryParams.userId, queryParams.viewerUserId]
   );
 
   // Real-time synchronization (silent background reload keeps map state intact)
@@ -136,6 +138,71 @@ export default function ConsumerMap() {
   const uniqueBatchIds = useMemo(() => {
     return [...new Set(mapPoints.map(p => p.batchId).filter(Boolean))];
   }, [mapPoints]);
+
+  // Hierarchical Grouping: Product -> Batch -> Complaint Records
+  const productHierarchy = useMemo(() => {
+    const complaintsList = mapData.complaints || [];
+
+    // Fallback if complaints array is not populated yet
+    let records = [...complaintsList];
+    if (!records.length && mapPoints.length) {
+      records = mapPoints.map(p => ({
+        id: p.id,
+        trackingCode: p.id,
+        batchId: p.batchId || null,
+        lot: p.lot || null,
+        productId: p.productId || "PRD-UNKNOWN",
+        productName: p.productName || "Product",
+        category: p.category || "other",
+        region: p.region || "Reported Area",
+        createdAt: p.createdAt,
+        description: "Consumer reported issue recorded for this product.",
+        severity: p.severity || "safe",
+        isOwn: p.isOwn || false,
+      }));
+    }
+
+    const prodMap = new Map();
+    for (const c of records) {
+      const prodName = c.productName || "Unspecified Product";
+      const prodKey = c.productId || prodName;
+
+      let pItem = prodMap.get(prodKey);
+      if (!pItem) {
+        pItem = {
+          productId: c.productId,
+          productName: prodName,
+          category: c.category || "other",
+          totalCount: 0,
+          batchesMap: new Map(),
+        };
+        prodMap.set(prodKey, pItem);
+      }
+      pItem.totalCount++;
+
+      const batchKey = c.batchId || "Direct / Unassigned Batch";
+      let bItem = pItem.batchesMap.get(batchKey);
+      if (!bItem) {
+        bItem = {
+          batchId: c.batchId || null,
+          batchLabel: c.batchId ? `Batch: ${c.batchId}` : "Direct / Unassigned Batch",
+          lot: c.lot || null,
+          severity: c.severity || "safe",
+          records: [],
+        };
+        pItem.batchesMap.set(batchKey, bItem);
+      }
+      bItem.records.push(c);
+    }
+
+    return [...prodMap.values()].map(p => ({
+      ...p,
+      batches: [...p.batchesMap.values()].map(b => ({
+        ...b,
+        count: b.records.length,
+      })),
+    }));
+  }, [mapData.complaints, mapPoints]);
 
   return (
     <div className="space-y-6 font-sans">
@@ -406,6 +473,7 @@ export default function ConsumerMap() {
                 connections={mapConnections}
                 colorMode={selectedCategory ? "batch" : "category"}
                 showConnections={true}
+                highlightedBatchId={highlightedBatchId}
               />
             </div>
 
@@ -538,85 +606,211 @@ export default function ConsumerMap() {
               </p>
             </div>
 
-            {/* List of complaint hotspot nodes */}
-            {mapPoints.length ? (
-              <ul style={{borderColor: THEME.line}} className="divide-y text-sm">
-                {mapPoints.map((node, i) => {
-                  const nodeCol = getSeverityAlertColor(node.severity || node.count);
-                  const sevLabel = getSeverityLabel(node.severity || node.count);
-                  const catKey = node.category || "other";
-                  const catLabel = CATEGORY_LABELS[catKey] || catKey.replace("_", " ");
+            {/* Hierarchical Grouping: Product -> Batch -> Complaint Records */}
+            {productHierarchy.length ? (
+              <div className="space-y-4 max-h-[560px] overflow-y-auto pr-1">
+                {productHierarchy.map((prod) => {
+                  const catKey = prod.category || "other";
                   const catColor = CATEGORY_COLORS[catKey] || THEME.muted;
+                  const catLabel = CATEGORY_LABELS[catKey] || catKey.replace("_", " ");
 
                   return (
-                    <li
-                      key={node.id || i}
-                      style={{borderColor: `${THEME.line}99`}}
-                      className="py-3 space-y-1.5"
+                    <section
+                      key={prod.productId || prod.productName}
+                      className="p-4 space-y-3"
+                      style={{
+                        background: THEME.paper,
+                        border: `1px solid ${THEME.line}`,
+                        borderRadius: "16px",
+                        boxShadow: "var(--shadow-soft)",
+                      }}
                     >
-                      <div className="flex items-start justify-between gap-2">
-                        <div className="flex items-center gap-2">
-                          <span
-                            className="w-3 h-3 rounded-full shrink-0 shadow-sm"
-                            style={{backgroundColor: catColor}}
-                          />
-                          <span style={{color: THEME.deep}} className="font-semibold leading-tight">
-                            {node.productName || "Product"}
-                          </span>
+                      {/* Top Level: Product Heading */}
+                      <div className="flex items-start justify-between gap-3 border-b pb-2.5" style={{borderColor: THEME.line}}>
+                        <div>
+                          <h3 style={{color: THEME.deep}} className="text-lg font-semibold tracking-tight leading-snug">
+                            {prod.productName}
+                          </h3>
+                          <div className="flex items-center gap-2 mt-1">
+                            <span
+                              style={{background: catColor, color: THEME.off}}
+                              className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0"
+                            >
+                              {catLabel}
+                            </span>
+                            <span style={{color: THEME.muted}} className="text-xs">
+                              {prod.batches.length} {prod.batches.length === 1 ? "batch affected" : "batches affected"}
+                            </span>
+                          </div>
                         </div>
                         <span
                           style={{
-                            backgroundColor: `${nodeCol}1a`,
-                            color: nodeCol,
-                            borderColor: `${nodeCol}44`,
-                          }}
-                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider shrink-0 border"
-                        >
-                          {sevLabel}
-                        </span>
-                      </div>
-
-                      <div className="grid grid-cols-2 gap-x-2 text-xs pl-5">
-                        <div>
-                          <span style={{color: THEME.muted}}>Batch / LOT: </span>
-                          <span style={{color: THEME.ink}} className="font-mono font-medium">
-                            {node.batchId || "—"} {node.lot ? `(${node.lot})` : ""}
-                          </span>
-                        </div>
-                        <div className="text-right">
-                          <span style={{color: THEME.muted}}>Location: </span>
-                          <span style={{color: THEME.ink}}>{node.region || "Reported Area"}</span>
-                        </div>
-                      </div>
-
-                      <div className="flex items-center justify-between pl-5 text-xs">
-                        <span style={{color: THEME.deep}} className="font-medium">
-                          {node.count} {node.count === 1 ? "complaint recorded" : "complaints recorded"}
-                        </span>
-                        {node.createdAt && (
-                          <span style={{color: THEME.muted}} className="text-[11px]">{fmtDateTime(node.createdAt)}</span>
-                        )}
-                      </div>
-
-                      {node.isOwn && (
-                        <div
-                          style={{
-                            background: `${THEME.cream}66`,
+                            background: `${THEME.sand}80`,
                             color: THEME.deep,
                             borderColor: THEME.line,
                           }}
-                          className="ml-5 text-[11px] font-medium border px-2 py-0.5 rounded"
+                          className="text-xs font-semibold px-2.5 py-1 rounded-full border shrink-0"
                         >
-                          Your submitted complaint
-                        </div>
-                      )}
-                    </li>
+                          {prod.totalCount} {prod.totalCount === 1 ? "complaint" : "complaints"}
+                        </span>
+                      </div>
+
+                      {/* Mid Level: Batch Sub-Boxes */}
+                      <div className="space-y-3 pt-1">
+                        {prod.batches.map((batch) => {
+                          const isHighlighted = highlightedBatchId && batch.batchId === highlightedBatchId;
+                          const sevColor = getSeverityAlertColor(batch.severity || batch.count);
+                          const sevLabel = getSeverityLabel(batch.severity || batch.count);
+
+                          return (
+                            <div
+                              key={batch.batchId || batch.batchLabel}
+                              className="border rounded-xl overflow-hidden mb-3 last:mb-0 transition-all"
+                              style={{
+                                background: "rgba(255, 255, 255, 0.7)",
+                                borderColor: isHighlighted ? THEME.deep : THEME.line,
+                                boxShadow: isHighlighted ? "0 0 0 1.5px #274245" : "none",
+                              }}
+                            >
+                              {/* Batch Header */}
+                              <div
+                                className="px-3.5 py-2 border-b flex justify-between items-center gap-2"
+                                style={{
+                                  background: isHighlighted ? `${THEME.sand}99` : `${THEME.sand}4D`,
+                                  borderColor: THEME.line,
+                                }}
+                              >
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <span
+                                    style={{color: THEME.deep}}
+                                    className="font-mono font-medium text-sm"
+                                  >
+                                    {batch.batchId ? `Batch: ${batch.batchId}` : batch.batchLabel}
+                                  </span>
+                                  {batch.lot && (
+                                    <span style={{color: THEME.muted}} className="text-xs font-mono">
+                                      (LOT: {batch.lot})
+                                    </span>
+                                  )}
+                                </div>
+
+                                <div className="flex items-center gap-2 shrink-0">
+                                  <span
+                                    style={{
+                                      background: THEME.off,
+                                      borderColor: `${THEME.line}CC`,
+                                      color: THEME.deep,
+                                    }}
+                                    className="text-xs font-medium border px-2 py-0.5 rounded-full"
+                                  >
+                                    {batch.count} {batch.count === 1 ? "complaint filed" : "complaints filed"}
+                                  </span>
+
+                                  {batch.batchId && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setHighlightedBatchId(isHighlighted ? null : batch.batchId)}
+                                      style={{
+                                        background: isHighlighted ? THEME.deep : THEME.off,
+                                        color: isHighlighted ? THEME.off : THEME.deep,
+                                        borderColor: isHighlighted ? THEME.deep : THEME.line,
+                                      }}
+                                      className="text-[11px] font-medium border px-2 py-0.5 rounded-full transition hover:opacity-90 shadow-2xs"
+                                      title="Isolate and highlight this batch on the map"
+                                    >
+                                      {isHighlighted ? "Highlighted" : "Highlight"}
+                                    </button>
+                                  )}
+                                </div>
+                              </div>
+
+                              {/* Inner Level: Complaint Records */}
+                              <div
+                                className="divide-y"
+                                style={{borderColor: `${THEME.line}99`}}
+                              >
+                                {batch.records.map((c, rIdx) => {
+                                  const recSevColor = getSeverityAlertColor(c.severity || batch.severity);
+                                  const recSevLabel = getSeverityLabel(c.severity || batch.severity);
+                                  const timeStr = fmtAgo(c.createdAt) || fmtDate(c.createdAt);
+
+                                  return (
+                                    <div
+                                      key={c.id || c.trackingCode || rIdx}
+                                      className="p-3 space-y-1.5 transition-colors"
+                                    >
+                                      {/* Date, Region, and Severity Badge */}
+                                      <div className="flex items-center justify-between gap-2 text-xs">
+                                        <span style={{color: THEME.muted}} className="font-medium">
+                                          -record {rIdx + 1}: {timeStr ? `${timeStr} · ` : ""}{c.region || "Reported Area"}
+                                        </span>
+                                        <span
+                                          style={{
+                                            backgroundColor: `${recSevColor}1a`,
+                                            color: recSevColor,
+                                            borderColor: `${recSevColor}44`,
+                                          }}
+                                          className="px-2 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider border shrink-0"
+                                        >
+                                          {recSevLabel}
+                                        </span>
+                                      </div>
+
+                                      {/* Truncated problem description snippet */}
+                                      <p
+                                        className="text-xs leading-relaxed line-clamp-2 pl-2.5 border-l-2"
+                                        style={{
+                                          borderColor: THEME.line,
+                                          color: "rgba(32, 52, 55, 0.85)",
+                                        }}
+                                      >
+                                        {c.description || "Consumer issue recorded."}
+                                      </p>
+
+                                      {/* Tracking code / status snippet */}
+                                      <div className="flex items-center justify-between text-[11px] pt-0.5">
+                                        <span style={{color: THEME.muted}}>
+                                          Ref: <span className="font-mono font-medium" style={{color: THEME.deep}}>{c.trackingCode || c.id}</span>
+                                        </span>
+                                        <div className="flex items-center gap-2">
+                                          {user && c.isOwn ? (
+                                            <>
+                                              <span
+                                                style={{
+                                                  background: `${THEME.cream}66`,
+                                                  color: THEME.deep,
+                                                  borderColor: THEME.line,
+                                                }}
+                                                className="text-[10px] font-medium border px-1.5 py-0.5 rounded"
+                                              >
+                                                Your filing
+                                              </span>
+                                              <Link
+                                                to={`/consumer/status/${encodeURIComponent(c.trackingCode || c.id)}`}
+                                                className="navlink text-xs font-medium"
+                                                style={{color: THEME.deep}}
+                                              >
+                                                View report
+                                              </Link>
+                                            </>
+                                          ) : null}
+                                        </div>
+                                      </div>
+                                    </div>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </section>
                   );
                 })}
-              </ul>
+              </div>
             ) : (
-              <Empty icon={MapPinned}>
-                No complaints matching the selected filters found.
+              <Empty icon={MessageSquareWarning}>
+                No complaints found for the selected category or filters.
               </Empty>
             )}
 

@@ -124,7 +124,7 @@ export async function dashboardSummary() {
 
 // Enhanced public complaint map: returns individual complaints as points grouped by batch for connections
 // Returns real lat/lng as coarsened grid cell centers (privacy preservation)
-export async function publicCorrelations({category, days = 90, batchId, userId, city} = {}) {
+export async function publicCorrelations({category, days = 90, batchId, userId, city, viewerUserId} = {}) {
   const since = new Date(Date.now() - days * 864e5).toISOString();
   const q = {created_at: {$gte: since}};
   if (batchId) q.batch_id = batchId;
@@ -147,6 +147,8 @@ export async function publicCorrelations({category, days = 90, batchId, userId, 
     rows = rows.filter(r => r.region && r.region.toLowerCase().includes(city.toLowerCase()));
   }
 
+  const viewer = viewerUserId || userId;
+
   const d = config.publicMapCellDeg;
   const coarsen = (lat, lng) => ({
     lat: +((Math.floor(lat / d) + 0.5) * d).toFixed(3),
@@ -167,9 +169,10 @@ export async function publicCorrelations({category, days = 90, batchId, userId, 
   const complaintRecords = rows.map(r => {
     const prod = prodMap.get(r.product_id);
     const batch = r.batch_id ? batchMap.get(r.batch_id) : null;
+    const isOwn = !!(viewer && r.submitted_by && r.submitted_by === viewer);
     return {
       id: r._id,
-      trackingCode: r.tracking_code || r._id,
+      trackingCode: isOwn ? (r.tracking_code || r._id) : undefined,
       batchId: r.batch_id || null,
       lot: batch?.lot || null,
       productId: r.product_id || null,
@@ -180,7 +183,7 @@ export async function publicCorrelations({category, days = 90, batchId, userId, 
       createdAt: r.created_at,
       description: r.description || "Unusual condition reported.",
       severity: batch?.status || "safe",
-      isOwn: userId ? r.submitted_by === userId : false,
+      isOwn,
     };
   });
 
@@ -237,13 +240,13 @@ export async function publicCorrelations({category, days = 90, batchId, userId, 
         severity: batch?.status || "safe",
         complaintIds: [],
         createdAt: r.created_at,
-        isOwn: userId ? r.submitted_by === userId : false,
+        isOwn: !!(viewer && r.submitted_by && r.submitted_by === viewer),
       };
       nodeMap.set(k, node);
     }
     node.count++;
     node.complaintIds.push(r._id);
-    if (userId && r.submitted_by === userId) node.isOwn = true;
+    if (viewer && r.submitted_by === viewer) node.isOwn = true;
   }
 
   // Calculate severity on nodes based on count if batch is safe
