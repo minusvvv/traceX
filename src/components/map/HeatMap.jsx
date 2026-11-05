@@ -1,5 +1,5 @@
 import {useEffect, useMemo, useRef} from "react";
-import {MapContainer, TileLayer, Circle, Polyline, Tooltip, Popup, useMap} from "react-leaflet";
+import {MapContainer, TileLayer, Circle, CircleMarker, Polyline, Tooltip, Popup, useMap} from "react-leaflet";
 
 // Design Tokens strictly from index.css
 export const THEME = {
@@ -110,12 +110,15 @@ function Fit({ pts }) {
 }
 
 // Legacy heatmap mode with strict theme tokens and 3-circle radial bloom structure
-function HeatmapMode({hotspots, variant, labels}) {
-  const pts = hotspots.map(h => [h.lat, h.lng]);
+function HeatmapMode({hotspots, variant, labels, complaints = [], showComplaints = true, showHotspots = true}) {
+  const pts = [
+    ...hotspots.map(h => [h.lat, h.lng]),
+    ...(showComplaints ? complaints.filter(c => c.lat != null && c.lng != null).map(c => [c.lat, c.lng]) : [])
+  ];
   return (
     <>
       <Fit pts={pts}/>
-      {[...hotspots].sort((a, b) => a.reports - b.reports).flatMap(h => {
+      {showHotspots && [...hotspots].sort((a, b) => a.reports - b.reports).flatMap(h => {
         const spotColor = getSeverityAlertColor(h.reports);
         const sevLabel = getSeverityLabel(h.reports);
         return [
@@ -174,6 +177,52 @@ function HeatmapMode({hotspots, variant, labels}) {
             )}
           </Circle>
         ));
+      })}
+
+      {showComplaints && complaints.map(c => {
+        if (c.lat == null || c.lng == null) return null;
+        const color = c.severity ? getSeverityAlertColor(c.severity) : (CATEGORY_COLORS[c.category] || THEME.crit);
+        return (
+          <CircleMarker
+            key={`complaint-dot-${c.id}`}
+            center={[c.lat, c.lng]}
+            radius={5.5}
+            pathOptions={{
+              color: THEME.off,
+              weight: 1.5,
+              fillColor: color,
+              fillOpacity: 0.9,
+            }}
+          >
+            <Tooltip sticky direction="top" offset={[0, -6]} opacity={1}>
+              <div
+                style={{
+                  background: THEME.off,
+                  color: THEME.ink,
+                  fontFamily: "Inter, system-ui, sans-serif",
+                  borderColor: THEME.line,
+                }}
+                className="p-2 rounded-xl text-xs space-y-1 border shadow-sm max-w-[220px]"
+              >
+                <div style={{color: THEME.deep}} className="font-semibold text-xs flex items-center justify-between gap-2">
+                  <span>{c.productName || "Product Report"}</span>
+                  <span className="text-[10px] font-mono px-1 py-0.5 rounded bg-sand/60 text-deep">
+                    {c.trackingCode || c.id}
+                  </span>
+                </div>
+                <div style={{color: THEME.muted}} className="text-[11px]">
+                  {c.region || "Reported Area"}
+                  {c.batchId ? ` · Batch: ${c.batchId}` : ""}
+                </div>
+                {c.description && (
+                  <div className="text-[11px] text-ink/80 line-clamp-2 italic pt-1 border-t border-line/60">
+                    "{c.description}"
+                  </div>
+                )}
+              </div>
+            </Tooltip>
+          </CircleMarker>
+        );
       })}
     </>
   );
@@ -393,6 +442,9 @@ function EnhancedMode({points = [], connections = [], colorMode = "category", sh
 
 export default function HeatMap({
   hotspots = [],
+  complaints = [],
+  showComplaints = true,
+  showHotspots = true,
   className = "",
   variant = "internal",
   labels,
@@ -415,7 +467,14 @@ export default function HeatMap({
         url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
       />
       {mode === "heatmap" ? (
-        <HeatmapMode hotspots={hotspots} variant={variant} labels={labels}/>
+        <HeatmapMode
+          hotspots={hotspots}
+          complaints={complaints}
+          showComplaints={showComplaints}
+          showHotspots={showHotspots}
+          variant={variant}
+          labels={labels}
+        />
       ) : (
         <EnhancedMode
           points={points}

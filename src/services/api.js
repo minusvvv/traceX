@@ -67,6 +67,8 @@ export const setThreshold = (scope, body) => request("/admin/thresholds/" + scop
 export const removeThreshold = scope => request("/admin/thresholds/" + scope, {method: "DELETE"});
 export const getIntegrations = () => request("/admin/integrations");
 export const getAudit = f => request("/admin/audit" + qs(f));
+export const getActiveComplaints = () => request("/admin/complaints/active");
+export const checkAlertPipeline = target => request("/admin/alert-check" + qs(typeof target === "string" ? {batchId: target} : target));
 
 // external supply-chain data provider
 export const postProviderRecords = (batchId, records) => request(`/provider/supply-chain/${encodeURIComponent(batchId)}/records`, {method: "POST", body: {records}});

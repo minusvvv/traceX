@@ -4,7 +4,14 @@ const BASE = (import.meta.env.VITE_API_URL || "/api").replace(/\/$/, "");
 export const apiUrl = path => BASE + path;
 
 export class ApiError extends Error {
-  constructor(status, message, data) { super(message); this.status = status; this.data = data || null; this.fields = data?.fields || {}; this.code = data?.code; }
+  constructor(status, message, data) {
+    const fieldMsg = data?.fields && Object.values(data.fields).filter(Boolean).join(". ");
+    super(fieldMsg || message);
+    this.status = status;
+    this.data = data || null;
+    this.fields = data?.fields || {};
+    this.code = data?.code;
+  }
 }
 
 export async function request(path, {method = "GET", body, form, headers = {}} = {}) {

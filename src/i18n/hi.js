@@ -1,6 +1,6 @@
 export default {
 "lang.switch":"English","lang.label":"भाषा",
-"nav.verify":"जाँचें","nav.report":"समस्या बताएँ","nav.status":"स्थिति देखें","nav.map":"सार्वजनिक मानचित्र","nav.staff":"स्टाफ साइन-इन","nav.workspace":"कार्यक्षेत्र पर वापस",
+"nav.verify":"जाँचें","nav.report":"समस्या बताएँ","nav.status":"स्थिति देखें","nav.map":"सार्वजनिक मानचित्र","nav.staff":"साइन-इन","nav.workspace":"कार्यक्षेत्र पर वापस",
 "verify.title":"अपने उत्पाद की जाँच करें।","verify.sub":"अपने पैक पर छपा बैच कोड या लॉट नंबर दर्ज करें।","verify.label":"बैच कोड","verify.button":"जाँचें",
 "verify.hint":"निश्चित नहीं हैं? आप समस्या दर्ज कर सकते हैं या शिकायत की स्थिति देख सकते हैं।",
 "verify.verified":"सत्यापित","verify.review":"समीक्षाधीन","verify.notFound":"बैच नहीं मिला","verify.notFoundText":"हमें “{code}” नहीं मिला। कोड जाँचकर पुनः प्रयास करें।","verify.tryAnother":"दूसरा कोड आज़माएँ",

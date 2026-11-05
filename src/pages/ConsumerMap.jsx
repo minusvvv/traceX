@@ -1,6 +1,6 @@
 import {useEffect, useState, useCallback, useMemo} from "react";
 import {Link} from "react-router-dom";
-import {MapPinned, MessageSquareWarning, RefreshCw, Navigation, Building2, UserCheck, Layers} from "lucide-react";
+import {MapPinned, MessageSquareWarning, RefreshCw, Navigation, Building2, UserCheck, Layers, Lock} from "lucide-react";
 import useAsync from "../hooks/useAsync.js";
 import {getPublicCorrelations, getMyComplaints} from "../services/api.js";
 import useMeta from "../hooks/useMeta.js";
@@ -44,6 +44,9 @@ export default function ConsumerMap() {
   const [days, setDays] = useState(90);
   const [filterCityOnly, setFilterCityOnly] = useState(false);
   const [filterMineOnly, setFilterMineOnly] = useState(false);
+  useEffect(() => {
+    if (!user) setFilterMineOnly(false);
+  }, [user]);
   const [detectedCity, setDetectedCity] = useState("");
   const [cityInput, setCityInput] = useState("");
   const [lastRefreshed, setLastRefreshed] = useState(Date.now());
@@ -405,7 +408,21 @@ export default function ConsumerMap() {
             </button>
 
             {/* Quick Filter: My Complaints */}
-            {user?.role === "consumer" && (
+            {!user ? (
+              <Link
+                to="/login"
+                style={{
+                  background: THEME.off,
+                  color: THEME.muted,
+                  borderColor: THEME.line,
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition hover:opacity-80 shadow-sm"
+                title="Sign in to view your complaints"
+              >
+                <Lock size={13} style={{color: THEME.muted}} />
+                Sign in to view your complaints
+              </Link>
+            ) : (
               <button
                 type="button"
                 aria-pressed={filterMineOnly}

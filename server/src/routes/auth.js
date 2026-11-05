@@ -29,7 +29,7 @@ const signIn = consumerOnly => ah(async (req, res) => {
 });
 r.post("/login", limiter(15 * 60e3, 20, "Too many sign-in attempts. Try again in a few minutes."), signIn(false));
 r.post("/consumer-login", limiter(15 * 60e3, 20, "Too many sign-in attempts. Try again in a few minutes."), signIn(true));
-r.post("/register", limiter(60 * 60e3, 10, "Too many account creation attempts. Try again later."), ah(async (req, res) => {
+r.post("/register", limiter(60 * 60e3, 50, "Too many account creation attempts. Try again later."), ah(async (req, res) => {
   const input = parse(consumerRegisterSchema, req.body);
   let user;
   try {

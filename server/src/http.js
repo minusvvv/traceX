@@ -8,7 +8,9 @@ export function parse(schema, data) {
   if (r.success) return r.data;
   const fields = {};
   for (const i of r.error.issues) fields[i.path.join(".") || "_"] ??= i.message;
-  throw new HttpError(422, "Please correct the highlighted fields.", {fields});
+  const firstError = Object.values(fields)[0];
+  const message = firstError ? `${firstError}` : "Please correct the highlighted fields.";
+  throw new HttpError(422, message, {fields});
 }
 export const errorHandler = (err, req, res, _next) => {
   if (err instanceof HttpError) return res.status(err.status).json({error: err.message, ...err.extra});

@@ -5,11 +5,14 @@ const opt = s => z.preprocess(emptyToUndef, s.optional());
 const num = (min, max) => z.preprocess(v => (v === "" || v == null ? undefined : Number(v)), z.number().finite().min(min).max(max).optional());
 const iso = z.string().refine(v => !Number.isNaN(Date.parse(v)), "Must be a valid date/time");
 
-export const loginSchema = z.object({email: z.string().email().max(200), password: z.string().min(1).max(200)});
+export const loginSchema = z.object({
+  email: z.string().trim().email("Please enter a valid email address").max(200).transform(v => v.toLowerCase()),
+  password: z.string().min(1, "Password is required").max(200),
+});
 export const consumerRegisterSchema = z.object({
-  name: z.string().trim().min(2, "Enter your name").max(100),
-  email: z.string().trim().email().max(200).transform(v => v.toLowerCase()),
-  password: z.string().min(12, "Use at least 12 characters").max(200),
+  name: z.string().trim().min(2, "Enter your name (at least 2 characters)").max(100),
+  email: z.string().trim().email("Please enter a valid email address").max(200).transform(v => v.toLowerCase()),
+  password: z.string().min(8, "Password must be at least 8 characters").max(200),
 });
 
 export const complaintSchema = z.object({

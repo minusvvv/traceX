@@ -1,6 +1,6 @@
 export default {
 "lang.switch":"हिन्दी","lang.label":"Language",
-"nav.verify":"Verify","nav.report":"Report a problem","nav.status":"Check status","nav.map":"Public map","nav.staff":"Staff sign in","nav.workspace":"Back to workspace",
+"nav.verify":"Verify","nav.report":"Report a problem","nav.status":"Check status","nav.map":"Public map","nav.staff":"Sign in","nav.workspace":"Back to workspace",
 "verify.title":"Verify your product.","verify.sub":"Enter the batch code or lot number printed on your pack.","verify.label":"Batch code","verify.button":"Verify",
 "verify.hint":"Not sure? You can also report a problem or check the status of a complaint.",
 "verify.verified":"Verified","verify.review":"Under review","verify.notFound":"Batch not found","verify.notFoundText":"We couldn't find “{code}”. Check the code and try again.","verify.tryAnother":"Try another code",

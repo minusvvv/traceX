@@ -1,67 +1,808 @@
-import {useEffect,useState} from "react";import {useSearchParams} from "react-router-dom";import {Users as UsersIcon,SlidersHorizontal,Plug,ScrollText,ShieldCheck,ShieldAlert,UserPlus,MapPinned,MessageSquareWarning} from "lucide-react";
-import useAsync from "../hooks/useAsync.js";import useMeta from "../hooks/useMeta.js";import PageHeader from "../components/common/PageHeader.jsx";import LoadingState from "../components/common/LoadingState.jsx";
-import * as api from "../services/api.js";import {Btn,Field,Notice,inputCls,ErrorState,Empty} from "../components/common/Form.jsx";import {fmtDateTime} from "../utils/formatters.js";import {useAuth} from "../auth/AuthContext.jsx";
-import Page from "../components/ui/Page.jsx";import Panel from "../components/ui/Panel.jsx";import StatTile from "../components/ui/StatTile.jsx";import HeatMap from "../components/map/HeatMap.jsx";import ConfirmDialog from "../components/ui/ConfirmDialog.jsx";
-import {complaintIntensityColor,complaintSeverity,complaintSeverityLabel} from "../utils/complaintIntensity.js";
-const numCls="w-24 border border-line rounded-full px-3 py-1.5 bg-white/70 focus:border-deep outline-none";
-function Thresholds(){const {meta}=useMeta(),{data,error,reload}=useAsync(api.getThresholds),[vals,setVals]=useState({}),[msg,setMsg]=useState(null),[err,setErr]=useState({}),[busy,setBusy]=useState(null),[drop,setDrop]=useState(null);
-  if(error)return <ErrorState error={error} onRetry={reload}/>;if(!data)return <LoadingState/>;
-  const rows=[{scope:"global",label:"All categories (default)"},...Object.values(meta?.categories||{}).map(c=>({scope:c.key,label:c.label}))],cur=Object.fromEntries(data.map(t=>[t.scope,t]));
-  const save=async s=>{const v=vals[s]||{},t=cur[s],body={count:v.count??t?.count,windowDays:v.windowDays??t?.windowDays};setErr({});setMsg(null);setBusy(s);try{await api.setThreshold(s,body);setMsg({tone:"ok",text:"Threshold saved and recorded in the audit log."});setVals(x=>({...x,[s]:undefined}));reload()}catch(e){setErr({[s]:e.fields});setMsg({tone:"error",text:e.message})}finally{setBusy(null)}};
-  const remove=async()=>{setBusy("drop");try{await api.removeThreshold(drop.scope);setMsg({tone:"ok",text:`${drop.label} now uses the default threshold. Recorded in the audit log.`});reload()}catch(e){setMsg({tone:"error",text:e.message})}finally{setBusy(null);setDrop(null)}};
-  return <Panel icon={SlidersHorizontal} title="Complaint thresholds" desc="A batch is flagged when it receives this many complaints within the window. A category row overrides the default. Every change is audited.">
-    {msg&&<Notice tone={msg.tone==="ok"?"ok":"error"} className="mb-4">{msg.text}</Notice>}
-    <div className="overflow-x-auto -mx-2"><table className="tbl min-w-[560px]"><thead><tr><th>Scope</th><th>Complaints</th><th>Window (days)</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{rows.map(r=>{const t=cur[r.scope],v=vals[r.scope]||{},e=err[r.scope]||{},dirty=v.count!==undefined||v.windowDays!==undefined;return <tr key={r.scope}><td>{r.label}{!t&&<span className="block text-xs text-muted">uses the default</span>}</td>
-      <td><input aria-label={`${r.label} complaint count`} type="number" min="1" className={numCls} value={v.count??t?.count??""} placeholder={cur.global?.count} onChange={e=>setVals({...vals,[r.scope]:{...v,count:e.target.value}})}/>{e.count&&<p role="alert" className="text-xs text-crit mt-1">{e.count}</p>}</td>
-      <td><input aria-label={`${r.label} window days`} type="number" min="1" max="365" className={numCls} value={v.windowDays??t?.windowDays??""} placeholder={cur.global?.windowDays} onChange={e=>setVals({...vals,[r.scope]:{...v,windowDays:e.target.value}})}/>{e.windowDays&&<p role="alert" className="text-xs text-crit mt-1">{e.windowDays}</p>}</td>
-      <td className="text-right whitespace-nowrap"><Btn variant="ghost" className="!py-1.5" loading={busy===r.scope} disabled={!dirty} onClick={()=>save(r.scope)}>Save</Btn>{r.scope!=="global"&&t&&<button className="navlink text-sm ml-3" onClick={()=>setDrop(r)}>Use default</button>}</td></tr>})}</tbody></table></div>
-    <ConfirmDialog open={!!drop} title="Use the default threshold?" confirmLabel="Use default" busy={busy==="drop"} onConfirm={remove} onCancel={()=>setDrop(null)}>{drop&&<>The override for <b>{drop.label}</b> will be removed and the default applies. Batches may be flagged or unflagged as a result. The change is recorded in the audit log.</>}</ConfirmDialog></Panel>}
-function ComplaintActivity(){const {data,error,loading,reload}=useAsync(()=>Promise.all([api.getComplaintSummary(),api.getHotspots()]),[]);
-  useEffect(()=>{const timer=setInterval(reload,30000);return()=>clearInterval(timer)},[reload]);
-  if(error)return <ErrorState error={error} onRetry={reload}/>;if(loading||!data)return <LoadingState/>;
-  const [summary,hotspots]=data;
-  return <div className="space-y-5">
-    <StatTile label="Current complaint total" value={summary.total} hint="All complaints received · refreshed every 30 seconds" icon={MessageSquareWarning}/>
-    <Panel icon={MapPinned} title="Complaint activity map" desc="Areas are ranked by complaint count. Alerts and map color reflect report volume, not batch status or confirmed contamination. The highest-count areas draw on top.">
-      <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-5">
-        <div className="h-[380px] rounded-2xl overflow-hidden border border-line"><HeatMap hotspots={hotspots}/></div>
-        <div className="overflow-x-auto">{hotspots.length?<table className="tbl"><thead><tr><th>Region</th><th>Current reports</th><th>Alert level</th></tr></thead><tbody>{hotspots.map(h=>{const severity=complaintSeverity(h.reports);return <tr key={h.region+h.lat}><td className="font-medium text-deep">{h.region}<span className="block text-xs font-normal text-muted">{h.stage&&h.stage!=="—"?`Stage: ${h.stage}`:`${h.batches} batch${h.batches===1?"":"es"}`}</span></td><td className="tabular-nums font-semibold">{h.reports}</td><td><span className="inline-flex items-center gap-1.5 text-sm"><span aria-hidden className="w-2.5 h-2.5 rounded-full" style={{background:complaintIntensityColor(h.reports)}}/>{complaintSeverityLabel[severity]}</span></td></tr>})}</tbody></table>:<Empty icon={MapPinned}>No complaints with a recorded location yet.</Empty>}</div>
+import {useEffect, useState} from "react";
+import {useSearchParams} from "react-router-dom";
+import {
+  Users as UsersIcon,
+  SlidersHorizontal,
+  Plug,
+  ScrollText,
+  ShieldCheck,
+  ShieldAlert,
+  UserPlus,
+  MapPinned,
+  MessageSquareWarning,
+} from "lucide-react";
+import useAsync from "../hooks/useAsync.js";
+import useMeta from "../hooks/useMeta.js";
+import PageHeader from "../components/common/PageHeader.jsx";
+import LoadingState from "../components/common/LoadingState.jsx";
+import * as api from "../services/api.js";
+import {Btn, Field, Notice, inputCls, ErrorState, Empty} from "../components/common/Form.jsx";
+import {fmtDateTime} from "../utils/formatters.js";
+import {useAuth} from "../auth/AuthContext.jsx";
+import Page from "../components/ui/Page.jsx";
+import Panel from "../components/ui/Panel.jsx";
+import StatTile from "../components/ui/StatTile.jsx";
+import HeatMap from "../components/map/HeatMap.jsx";
+import ConfirmDialog from "../components/ui/ConfirmDialog.jsx";
+import {complaintIntensityColor, complaintSeverity, complaintSeverityLabel} from "../utils/complaintIntensity.js";
+
+const numCls = "w-24 border border-line rounded-full px-3 py-1.5 bg-white/70 focus:border-deep outline-none";
+
+function Thresholds() {
+  const {meta} = useMeta(),
+    {data, error, reload} = useAsync(api.getThresholds),
+    [vals, setVals] = useState({}),
+    [msg, setMsg] = useState(null),
+    [err, setErr] = useState({}),
+    [busy, setBusy] = useState(null),
+    [drop, setDrop] = useState(null);
+
+  if (error) return <ErrorState error={error} onRetry={reload} />;
+  if (!data) return <LoadingState />;
+
+  const rows = [
+    {scope: "global", label: "All categories (default)"},
+    ...Object.values(meta?.categories || {}).map(c => ({scope: c.key, label: c.label})),
+  ];
+  const cur = Object.fromEntries(data.map(t => [t.scope, t]));
+
+  const save = async s => {
+    const v = vals[s] || {},
+      t = cur[s],
+      body = {count: v.count ?? t?.count, windowDays: v.windowDays ?? t?.windowDays};
+    setErr({});
+    setMsg(null);
+    setBusy(s);
+    try {
+      await api.setThreshold(s, body);
+      setMsg({tone: "ok", text: "Threshold saved and recorded in the audit log."});
+      setVals(x => ({...x, [s]: undefined}));
+      reload();
+    } catch (e) {
+      setErr({[s]: e.fields});
+      setMsg({tone: "error", text: e.message});
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const remove = async () => {
+    setBusy("drop");
+    try {
+      await api.removeThreshold(drop.scope);
+      setMsg({tone: "ok", text: `${drop.label} now uses the default threshold. Recorded in the audit log.`});
+      reload();
+    } catch (e) {
+      setMsg({tone: "error", text: e.message});
+    } finally {
+      setBusy(null);
+      setDrop(null);
+    }
+  };
+
+  return (
+    <Panel
+      icon={SlidersHorizontal}
+      title="Complaint thresholds"
+      desc="A batch is flagged when it receives this many complaints within the window. A category row overrides the default. Every change is audited."
+    >
+      {msg && <Notice tone={msg.tone === "ok" ? "ok" : "error"} className="mb-4">{msg.text}</Notice>}
+      <div className="overflow-x-auto -mx-2">
+        <table className="tbl min-w-[560px]">
+          <thead>
+            <tr>
+              <th>Scope</th>
+              <th>Complaints</th>
+              <th>Window (days)</th>
+              <th><span className="sr-only">Actions</span></th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map(r => {
+              const t = cur[r.scope],
+                v = vals[r.scope] || {},
+                e = err[r.scope] || {},
+                dirty = v.count !== undefined || v.windowDays !== undefined;
+              return (
+                <tr key={r.scope}>
+                  <td>
+                    {r.label}
+                    {!t && <span className="block text-xs text-muted">uses the default</span>}
+                  </td>
+                  <td>
+                    <input
+                      aria-label={`${r.label} complaint count`}
+                      type="number"
+                      min="1"
+                      className={numCls}
+                      value={v.count ?? t?.count ?? ""}
+                      placeholder={cur.global?.count}
+                      onChange={e => setVals({...vals, [r.scope]: {...v, count: e.target.value}})}
+                    />
+                    {e.count && <p role="alert" className="text-xs text-crit mt-1">{e.count}</p>}
+                  </td>
+                  <td>
+                    <input
+                      aria-label={`${r.label} window days`}
+                      type="number"
+                      min="1"
+                      max="365"
+                      className={numCls}
+                      value={v.windowDays ?? t?.windowDays ?? ""}
+                      placeholder={cur.global?.windowDays}
+                      onChange={e => setVals({...vals, [r.scope]: {...v, windowDays: e.target.value}})}
+                    />
+                    {e.windowDays && <p role="alert" className="text-xs text-crit mt-1">{e.windowDays}</p>}
+                  </td>
+                  <td className="text-right whitespace-nowrap">
+                    <Btn
+                      variant="ghost"
+                      className="!py-1.5"
+                      loading={busy === r.scope}
+                      disabled={!dirty}
+                      onClick={() => save(r.scope)}
+                    >
+                      Save
+                    </Btn>
+                    {r.scope !== "global" && t && (
+                      <button className="navlink text-sm ml-3" onClick={() => setDrop(r)}>
+                        Use default
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
       </div>
-      <p className="text-xs text-muted mt-4">Moderate alert: 3+ reports · High: 5+ · Critical: 10+. Counts refresh automatically; reports remain unverified until investigated.</p>
+      <ConfirmDialog
+        open={!!drop}
+        title="Use the default threshold?"
+        confirmLabel="Use default"
+        busy={busy === "drop"}
+        onConfirm={remove}
+        onCancel={() => setDrop(null)}
+      >
+        {drop && (
+          <>
+            The override for <b>{drop.label}</b> will be removed and the default applies. Batches may be flagged or
+            unflagged as a result. The change is recorded in the audit log.
+          </>
+        )}
+      </ConfirmDialog>
     </Panel>
-  </div>}
-function Users(){const {user}=useAuth(),{data,error,reload}=useAsync(api.getUsers),blank={email:"",name:"",role:"reviewer",password:"",labName:"",accreditationRef:""},[f,setF]=useState(blank),[err,setErr]=useState({}),[msg,setMsg]=useState(null),[busy,setBusy]=useState(false),[ask,setAsk]=useState(null),[askBusy,setAskBusy]=useState(false);
-  if(error)return <ErrorState error={error} onRetry={reload}/>;if(!data)return <LoadingState/>;const set=k=>e=>setF({...f,[k]:e.target.value});
-  const add=async e=>{e.preventDefault();setErr({});setMsg(null);setBusy(true);try{await api.createUser(f);setMsg({tone:"ok",text:"User created."});setF(blank);reload()}catch(x){setErr(x.fields||{});setMsg({tone:"error",text:x.message})}finally{setBusy(false)}};
-  const patch=async(id,b)=>{setMsg(null);setAskBusy(true);try{await api.patchUser(id,b);setMsg({tone:"ok",text:"User updated. Recorded in the audit log."});reload()}catch(x){setMsg({tone:"error",text:x.message})}finally{setAskBusy(false);setAsk(null)}};
-  return <div className="space-y-6">
-    <Panel icon={UsersIcon} title="Users and roles" desc="Roles decide what a person can see and do. Changes take effect on their next request and are audited. You cannot change your own role or access.">
-      {msg&&<Notice tone={msg.tone==="ok"?"ok":"error"} className="mb-4">{msg.text}</Notice>}
-      <div className="overflow-x-auto -mx-2"><table className="tbl min-w-[620px]"><thead><tr>{["Name","Email","Role","Laboratory","Active"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{data.map(u=><tr key={u.id} className={u.active?"":"text-muted"}><td className="font-medium text-deep">{u.name}{u.id===user.id&&<span className="ml-2 text-xs font-normal text-muted">you</span>}</td><td>{u.email}</td>
-        <td><select aria-label={`Role of ${u.name}`} className="border border-line rounded-full px-3 py-1 bg-white/70" value={u.role} disabled={u.id===user.id} onChange={e=>setAsk({kind:"role",u,role:e.target.value})}>{["admin","reviewer","lab","provider"].map(r=><option key={r}>{r}</option>)}</select></td><td className="text-muted">{u.labName?`${u.labName} (${u.accreditationRef})`:"—"}</td>
-        <td><label className="inline-flex items-center gap-2 text-sm"><input type="checkbox" className="w-4 h-4 accent-[#274245]" aria-label={`${u.name} active`} checked={u.active} disabled={u.id===user.id} onChange={e=>e.target.checked?patch(u.id,{active:true}):setAsk({kind:"deactivate",u})}/>{u.active?"Active":"Deactivated"}</label></td></tr>)}</tbody></table></div></Panel>
-    <Panel icon={UserPlus} title="Add user" desc="New users sign in with the initial password you set. Ask them to keep it private."><form onSubmit={add} className="grid sm:grid-cols-2 gap-4 max-w-3xl" noValidate>
-      <Field id="ue" label="Email" error={err.email}><input id="ue" type="email" className={inputCls} value={f.email} onChange={set("email")}/></Field><Field id="un" label="Name" error={err.name}><input id="un" className={inputCls} value={f.name} onChange={set("name")}/></Field>
-      <Field id="ur" label="Role"><select id="ur" className={inputCls} value={f.role} onChange={set("role")}>{["reviewer","lab","admin","provider"].map(r=><option key={r}>{r}</option>)}</select></Field><Field id="up" label="Initial password" hint="At least 12 characters." error={err.password}><input id="up" type="password" autoComplete="new-password" className={inputCls} value={f.password} onChange={set("password")}/></Field>
-      {f.role==="lab"&&<><Field id="ul" label="Laboratory name" error={err.labName}><input id="ul" className={inputCls} value={f.labName} onChange={set("labName")}/></Field><Field id="ua" label="Accreditation reference" error={err.accreditationRef}><input id="ua" className={inputCls} value={f.accreditationRef} onChange={set("accreditationRef")}/></Field></>}
-      <div className="sm:col-span-2"><Btn type="submit" loading={busy}>{busy?"Creating…":"Create user"}</Btn></div></form></Panel>
-    <ConfirmDialog open={!!ask} danger={ask?.kind==="deactivate"} busy={askBusy} title={ask?.kind==="deactivate"?"Deactivate this user?":"Change this user's role?"} confirmLabel={ask?.kind==="deactivate"?"Deactivate":"Change role"} onCancel={()=>setAsk(null)}
-      onConfirm={()=>ask.kind==="deactivate"?patch(ask.u.id,{active:false}):patch(ask.u.id,{role:ask.role})}>{ask&&(ask.kind==="deactivate"?<><b>{ask.u.name}</b> will no longer be able to sign in. Their past records and audit entries are kept.</>:<><b>{ask.u.name}</b> will change from <b>{ask.u.role}</b> to <b>{ask.role}</b>. Their access changes on their next request.</>)}</ConfirmDialog></div>}
-const Flag=({text,tone="info"})=><span className={"inline-block mr-2 text-[11px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 "+({ok:"bg-safe/15 text-[#3F6130]",sim:"bg-review/18 text-[#8A5A12]",off:"bg-sand text-deep/70",info:"bg-sand text-deep"}[tone])}>{text}</span>;
-function Integrations(){const {data:d,error,reload}=useAsync(api.getIntegrations);if(error)return <ErrorState error={error} onRetry={reload}/>;if(!d)return <LoadingState/>;
-  const R=({k,v,flag,tone})=><div className="py-3.5 border-b border-line/70 last:border-0 grid sm:grid-cols-[210px_1fr] gap-1 text-sm"><dt className="font-medium text-deep">{k}</dt><dd>{flag&&<Flag text={flag} tone={tone}/>}<span className="text-ink/80">{v}</span></dd></div>;
-  return <Panel icon={Plug} title="Integrations" desc="What is real and what is simulated in this deployment. Simulated integrations never contact an outside system."><dl>
-    <R k="Supply-chain provider" flag={d.supplyChain.mock?"MOCK":"LIVE"} tone={d.supplyChain.mock?"sim":"ok"} v={`${d.supplyChain.name}. ${d.supplyChain.description} Mode: ${d.supplyChain.mode}.`}/><R k="FSSAI submission" flag={d.fssai.simulated?"SIMULATED":"LIVE"} tone={d.fssai.simulated?"sim":"ok"} v={`${d.fssai.name}. ${d.fssai.description} Mode: ${d.fssai.mode}.`}/>
-    <R k="Image text extraction (OCR)" flag={d.ocr.available?"ON":"NOT AVAILABLE"} tone={d.ocr.available?"ok":"off"} v={d.ocr.note}/><R k="Notifications" flag={d.notifications.configured?"ON":"NOT CONFIGURED"} tone={d.notifications.configured?"ok":"off"} v={d.notifications.note}/><R k="Authentication" v={d.authentication.note}/><R k="Database" v={`${d.database.engine} (${d.database.file})`}/>
-    <R k="Failure simulation" flag={d.simulationEnabled?"ENABLED":"OFF"} tone={d.simulationEnabled?"sim":"off"} v="Lets reviewers trigger mock integration failures to test error handling. Keep off in production."/><R k="HTTPS" v={`Redirect enforced: ${d.https.enforced?"yes":"no"} · secure cookies: ${d.https.secureCookies?"yes":"no"}. Use HTTPS in deployment.`}/></dl></Panel>}
-function Audit(){const [action,setAction]=useState(""),{data,error,reload}=useAsync(()=>api.getAudit({action,limit:150}),[action]);if(error)return <ErrorState error={error} onRetry={reload}/>;if(!data)return <LoadingState/>;
-  return <Panel icon={ScrollText} title="Audit log" desc="An append-only record of sensitive actions. Entries are hash-chained so tampering is detectable."
-    actions={<span className={"inline-flex items-center gap-1.5 text-sm "+(data.chain.ok?"text-[#3F6130]":"text-crit font-medium")}>{data.chain.ok?<ShieldCheck size={16} aria-hidden/>:<ShieldAlert size={16} aria-hidden/>}{data.chain.ok?`Hash chain verified (${data.chain.checked} entries)`:`Hash chain BROKEN at entry ${data.chain.brokenAt}`}</span>}>
-    <div className="flex items-center gap-3 mb-4"><label htmlFor="af" className="text-sm text-muted">Filter</label><select id="af" value={action} onChange={e=>setAction(e.target.value)} className="border border-line rounded-full px-4 py-2 bg-white/70 text-sm"><option value="">All actions</option><option value="lab_report">Laboratory reports</option><option value="threshold">Threshold changes</option><option value="report">Investigation reports and submissions</option><option value="investigation">Investigation status</option><option value="user">Users</option><option value="auth">Sign-ins</option></select></div>
-    {data.entries.length?<div className="overflow-x-auto -mx-2"><table className="tbl min-w-[760px]"><thead><tr>{["Time","Actor","Action","Entity","Details"].map(h=><th key={h}>{h}</th>)}</tr></thead><tbody>{data.entries.map(e=><tr key={e.id}><td className="whitespace-nowrap tabular-nums">{fmtDateTime(e.at)}</td><td>{e.actor_email||e.actor_role}</td><td className="font-medium text-deep">{e.action}</td><td>{e.entity_type} {e.entity_id}</td><td className="text-muted break-all text-xs">{JSON.stringify(e.details).slice(0,140)}</td></tr>)}</tbody></table></div>:<Empty icon={ScrollText}>No entries.</Empty>}</Panel>}
-const SECTIONS=[["complaints","Complaint activity",MapPinned,ComplaintActivity],["users","Users and roles",UsersIcon,Users],["thresholds","Complaint thresholds",SlidersHorizontal,Thresholds],["integrations","Integrations",Plug,Integrations],["audit","Audit log",ScrollText,Audit]];
-export default function Admin(){const [sp,setSp]=useSearchParams(),tab=SECTIONS.some(s=>s[0]===sp.get("tab"))?sp.get("tab"):"complaints",Cur=SECTIONS.find(s=>s[0]===tab)[3];
-  return <Page><PageHeader eyebrow="Administration" title="Administration" sub="Live complaint activity, users and roles, complaint thresholds, integration status and the audit log. Permissions are enforced by the server."/>
-    <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6 lg:gap-10 items-start">
-      <nav aria-label="Administration sections" className="flex lg:flex-col gap-1 overflow-x-auto lg:sticky lg:top-20 -mx-4 px-4 lg:mx-0 lg:px-0">{SECTIONS.map(([k,l,I])=><button key={k} aria-current={tab===k?"page":undefined} onClick={()=>setSp({tab:k},{replace:true})} className={"flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm whitespace-nowrap text-left transition-colors duration-150 "+(tab===k?"bg-deep text-off":"text-deep hover:bg-sand/70")}><I size={16} aria-hidden/>{l}</button>)}</nav>
-      <div className="min-w-0" key={tab}><Cur/></div></div></Page>}
+  );
+}
+
+function ComplaintActivity() {
+  const {data, error, loading, reload} = useAsync(
+    () => Promise.all([
+      api.getComplaintSummary(),
+      api.getHotspots(),
+      api.getActiveComplaints().catch(() => ({complaints: []})),
+    ]),
+    []
+  );
+  const [showComplaints, setShowComplaints] = useState(true);
+  const [showHotspots, setShowHotspots] = useState(true);
+
+  useEffect(() => {
+    const timer = setInterval(reload, 30000);
+    return () => clearInterval(timer);
+  }, [reload]);
+
+  if (error) return <ErrorState error={error} onRetry={reload} />;
+  if (loading || !data) return <LoadingState />;
+
+  const [summary, hotspots, activeData] = data;
+  const complaints = activeData?.complaints || [];
+
+  return (
+    <div className="space-y-5">
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <StatTile
+          label="Current complaint total"
+          value={summary.total}
+          hint="All complaints received · refreshed every 30 seconds"
+          icon={MessageSquareWarning}
+        />
+        <StatTile
+          label="Geolocated active complaints"
+          value={complaints.length}
+          hint={`${hotspots.length} regional hotspots identified`}
+          icon={MapPinned}
+        />
+      </div>
+
+      <Panel
+        icon={MapPinned}
+        title="Complaint activity map"
+        desc="Areas are ranked by report volume. Toggle between individual complaint markers and regional hotspot density zones."
+        actions={
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setShowComplaints(!showComplaints)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                showComplaints
+                  ? "bg-deep text-off border-deep"
+                  : "bg-white/70 text-deep border-line hover:bg-white"
+              }`}
+            >
+              • Individual complaints ({complaints.length})
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowHotspots(!showHotspots)}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition ${
+                showHotspots
+                  ? "bg-deep text-off border-deep"
+                  : "bg-white/70 text-deep border-line hover:bg-white"
+              }`}
+            >
+              ◎ Hotspot zones ({hotspots.length})
+            </button>
+          </div>
+        }
+      >
+        <div className="grid grid-cols-1 xl:grid-cols-[1.4fr_1fr] gap-5">
+          <div className="h-[420px] rounded-2xl overflow-hidden border border-line">
+            <HeatMap
+              hotspots={hotspots}
+              complaints={complaints}
+              showComplaints={showComplaints}
+              showHotspots={showHotspots}
+            />
+          </div>
+          <div className="overflow-x-auto max-h-[420px]">
+            {hotspots.length ? (
+              <table className="tbl">
+                <thead>
+                  <tr>
+                    <th>Region</th>
+                    <th>Current reports</th>
+                    <th>Alert level</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {hotspots.map(h => {
+                    const severity = complaintSeverity(h.reports);
+                    return (
+                      <tr key={h.region + h.lat}>
+                        <td className="font-medium text-deep">
+                          {h.region}
+                          <span className="block text-xs font-normal text-muted">
+                            {h.stage && h.stage !== "—" ? `Stage: ${h.stage}` : `${h.batches} batch${h.batches === 1 ? "" : "es"}`}
+                          </span>
+                        </td>
+                        <td className="tabular-nums font-semibold">{h.reports}</td>
+                        <td>
+                          <span className="inline-flex items-center gap-1.5 text-sm">
+                            <span aria-hidden className="w-2.5 h-2.5 rounded-full" style={{background: complaintIntensityColor(h.reports)}} />
+                            {complaintSeverityLabel[severity]}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            ) : (
+              <Empty icon={MapPinned}>No complaints with a recorded location yet.</Empty>
+            )}
+          </div>
+        </div>
+        <p className="text-xs text-muted mt-4">
+          Moderate alert: 3+ reports · High: 5+ · Critical: 10+. Points show exact user report coordinates. Reports remain unverified until investigated.
+        </p>
+      </Panel>
+    </div>
+  );
+}
+
+function Users() {
+  const {user} = useAuth(),
+    {data, error, reload} = useAsync(api.getUsers),
+    blank = {email: "", name: "", role: "reviewer", password: "", labName: "", accreditationRef: ""},
+    [f, setF] = useState(blank),
+    [err, setErr] = useState({}),
+    [msg, setMsg] = useState(null),
+    [busy, setBusy] = useState(false),
+    [ask, setAsk] = useState(null),
+    [askBusy, setAskBusy] = useState(false);
+
+  if (error) return <ErrorState error={error} onRetry={reload} />;
+  if (!data) return <LoadingState />;
+
+  const set = k => e => setF({...f, [k]: e.target.value});
+
+  const add = async e => {
+    e.preventDefault();
+    setErr({});
+    setMsg(null);
+    setBusy(true);
+    try {
+      await api.createUser(f);
+      setMsg({tone: "ok", text: "User created."});
+      setF(blank);
+      reload();
+    } catch (x) {
+      setErr(x.fields || {});
+      setMsg({tone: "error", text: x.message});
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const patch = async (id, b) => {
+    setMsg(null);
+    setAskBusy(true);
+    try {
+      await api.patchUser(id, b);
+      setMsg({tone: "ok", text: "User updated. Recorded in the audit log."});
+      reload();
+    } catch (x) {
+      setMsg({tone: "error", text: x.message});
+    } finally {
+      setAskBusy(false);
+      setAsk(null);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <Panel
+        icon={UsersIcon}
+        title="Users and roles"
+        desc="Roles decide what a person can see and do. Changes take effect on their next request and are audited. You cannot change your own role or access."
+      >
+        {msg && <Notice tone={msg.tone === "ok" ? "ok" : "error"} className="mb-4">{msg.text}</Notice>}
+        <div className="overflow-x-auto -mx-2">
+          <table className="tbl min-w-[620px]">
+            <thead>
+              <tr>
+                {["Name", "Email", "Role", "Laboratory", "Active"].map(h => (
+                  <th key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.map(u => (
+                <tr key={u.id} className={u.active ? "" : "text-muted"}>
+                  <td className="font-medium text-deep">
+                    {u.name}
+                    {u.id === user.id && <span className="ml-2 text-xs font-normal text-muted">you</span>}
+                  </td>
+                  <td>{u.email}</td>
+                  <td>
+                    <select
+                      aria-label={`Role of ${u.name}`}
+                      className="border border-line rounded-full px-3 py-1 bg-white/70"
+                      value={u.role}
+                      disabled={u.id === user.id}
+                      onChange={e => setAsk({kind: "role", u, role: e.target.value})}
+                    >
+                      {["admin", "reviewer", "lab", "provider"].map(r => (
+                        <option key={r}>{r}</option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className="text-muted">{u.labName ? `${u.labName} (${u.accreditationRef})` : "—"}</td>
+                  <td>
+                    <label className="inline-flex items-center gap-2 text-sm">
+                      <input
+                        type="checkbox"
+                        className="w-4 h-4 accent-[#274245]"
+                        aria-label={`${u.name} active`}
+                        checked={u.active}
+                        disabled={u.id === user.id}
+                        onChange={e =>
+                          e.target.checked ? patch(u.id, {active: true}) : setAsk({kind: "deactivate", u})
+                        }
+                      />
+                      {u.active ? "Active" : "Deactivated"}
+                    </label>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+      <Panel
+        icon={UserPlus}
+        title="Add user"
+        desc="New users sign in with the initial password you set. Ask them to keep it private."
+      >
+        <form onSubmit={add} className="grid sm:grid-cols-2 gap-4 max-w-3xl" noValidate>
+          <Field id="ue" label="Email" error={err.email}>
+            <input id="ue" type="email" className={inputCls} value={f.email} onChange={set("email")} />
+          </Field>
+          <Field id="un" label="Name" error={err.name}>
+            <input id="un" className={inputCls} value={f.name} onChange={set("name")} />
+          </Field>
+          <Field id="ur" label="Role">
+            <select id="ur" className={inputCls} value={f.role} onChange={set("role")}>
+              {["reviewer", "lab", "admin", "provider"].map(r => (
+                <option key={r}>{r}</option>
+              ))}
+            </select>
+          </Field>
+          <Field id="up" label="Initial password" hint="At least 12 characters." error={err.password}>
+            <input
+              id="up"
+              type="password"
+              autoComplete="new-password"
+              className={inputCls}
+              value={f.password}
+              onChange={set("password")}
+            />
+          </Field>
+          {f.role === "lab" && (
+            <>
+              <Field id="ul" label="Laboratory name" error={err.labName}>
+                <input id="ul" className={inputCls} value={f.labName} onChange={set("labName")} />
+              </Field>
+              <Field id="ua" label="Accreditation reference" error={err.accreditationRef}>
+                <input id="ua" className={inputCls} value={f.accreditationRef} onChange={set("accreditationRef")} />
+              </Field>
+            </>
+          )}
+          <div className="sm:col-span-2">
+            <Btn type="submit" loading={busy}>
+              {busy ? "Creating…" : "Create user"}
+            </Btn>
+          </div>
+        </form>
+      </Panel>
+      <ConfirmDialog
+        open={!!ask}
+        danger={ask?.kind === "deactivate"}
+        busy={askBusy}
+        title={ask?.kind === "deactivate" ? "Deactivate this user?" : "Change this user's role?"}
+        confirmLabel={ask?.kind === "deactivate" ? "Deactivate" : "Change role"}
+        onCancel={() => setAsk(null)}
+        onConfirm={() =>
+          ask.kind === "deactivate" ? patch(ask.u.id, {active: false}) : patch(ask.u.id, {role: ask.role})
+        }
+      >
+        {ask &&
+          (ask.kind === "deactivate" ? (
+            <>
+              <b>{ask.u.name}</b> will no longer be able to sign in. Their past records and audit entries are kept.
+            </>
+          ) : (
+            <>
+              <b>{ask.u.name}</b> will change from <b>{ask.u.role}</b> to <b>{ask.role}</b>. Their access changes on
+              their next request.
+            </>
+          ))}
+      </ConfirmDialog>
+    </div>
+  );
+}
+
+const Flag = ({text, tone = "info"}) => (
+  <span
+    className={
+      "inline-block mr-2 text-[11px] font-semibold tracking-wide rounded-full px-2.5 py-0.5 " +
+      ({
+        ok: "bg-safe/15 text-[#3F6130]",
+        sim: "bg-review/18 text-[#8A5A12]",
+        off: "bg-sand text-deep/70",
+        info: "bg-sand text-deep",
+      }[tone])
+    }
+  >
+    {text}
+  </span>
+);
+
+function Integrations() {
+  const {data: d, error, reload} = useAsync(api.getIntegrations);
+  const [debugTarget, setDebugTarget] = useState("");
+  const [debugResult, setDebugResult] = useState(null);
+  const [debugBusy, setDebugBusy] = useState(false);
+  const [debugErr, setDebugErr] = useState(null);
+
+  const runAlertCheck = async e => {
+    e?.preventDefault();
+    if (!debugTarget.trim()) return;
+    setDebugBusy(true);
+    setDebugErr(null);
+    setDebugResult(null);
+    try {
+      const res = await api.checkAlertPipeline(debugTarget.trim());
+      setDebugResult(res);
+    } catch (err) {
+      setDebugErr(err.message || "Failed to check alert pipeline");
+    } finally {
+      setDebugBusy(false);
+    }
+  };
+
+  if (error) return <ErrorState error={error} onRetry={reload} />;
+  if (!d) return <LoadingState />;
+
+  const R = ({k, v, flag, tone}) => (
+    <div className="py-3.5 border-b border-line/70 last:border-0 grid sm:grid-cols-[210px_1fr] gap-1 text-sm">
+      <dt className="font-medium text-deep">{k}</dt>
+      <dd>
+        {flag && <Flag text={flag} tone={tone} />}
+        <span className="text-ink/80">{v}</span>
+      </dd>
+    </div>
+  );
+
+  return (
+    <div className="space-y-6">
+      <Panel
+        icon={Plug}
+        title="Integrations"
+        desc="What is real and what is simulated in this deployment. Simulated integrations never contact an outside system."
+      >
+        <dl>
+          <R
+            k="Supply-chain provider"
+            flag={d.supplyChain.mock ? "MOCK" : "LIVE"}
+            tone={d.supplyChain.mock ? "sim" : "ok"}
+            v={`${d.supplyChain.name}. ${d.supplyChain.description} Mode: ${d.supplyChain.mode}.`}
+          />
+          <R
+            k="FSSAI submission"
+            flag={d.fssai.simulated ? "SIMULATED" : "LIVE"}
+            tone={d.fssai.simulated ? "sim" : "ok"}
+            v={`${d.fssai.name}. ${d.fssai.description} Mode: ${d.fssai.mode}.`}
+          />
+          <R
+            k="Image text extraction (OCR)"
+            flag={d.ocr.available ? "ON" : "NOT AVAILABLE"}
+            tone={d.ocr.available ? "ok" : "off"}
+            v={d.ocr.note}
+          />
+          <R
+            k="Notifications & Alerts"
+            flag="ACTIVE"
+            tone="ok"
+            v="In-app threshold notification pipeline. Dispatches physical sample testing requests to consumers when complaints reach the threshold."
+          />
+          <R k="Authentication" v={d.authentication.note} />
+          <R k="Database" v={`${d.database.engine} (${d.database.file})`} />
+          <R
+            k="Failure simulation"
+            flag={d.simulationEnabled ? "ENABLED" : "OFF"}
+            tone={d.simulationEnabled ? "sim" : "off"}
+            v="Lets reviewers trigger mock integration failures to test error handling. Keep off in production."
+          />
+          <R
+            k="HTTPS"
+            v={`Redirect enforced: ${d.https.enforced ? "yes" : "no"} · secure cookies: ${
+              d.https.secureCookies ? "yes" : "no"
+            }. Use HTTPS in deployment.`}
+          />
+        </dl>
+      </Panel>
+
+      {/* Alert Pipeline Verification & Debug Tool */}
+      <Panel
+        icon={ShieldCheck}
+        title="Alert & Notification Pipeline Verification"
+        desc="Verify whether threshold flagging, SampleRequest creation, and consumer alerts are properly generated for any batch or product."
+      >
+        <form onSubmit={runAlertCheck} className="flex flex-wrap items-center gap-3">
+          <input
+            type="text"
+            className="border border-line rounded-xl px-3.5 py-2 bg-white/70 text-sm focus:border-deep outline-none min-w-[260px]"
+            placeholder="Enter Batch ID (e.g. B-101) or Product ID"
+            value={debugTarget}
+            onChange={e => setDebugTarget(e.target.value)}
+          />
+          <Btn type="submit" loading={debugBusy} disabled={!debugTarget.trim()}>
+            Check Alert Pipeline
+          </Btn>
+        </form>
+
+        {debugErr && <Notice tone="error" className="mt-4">{debugErr}</Notice>}
+
+        {debugResult && (
+          <div className="mt-4 p-4 rounded-2xl bg-white/60 border border-line space-y-3 text-sm">
+            <div className="flex flex-wrap items-center justify-between gap-2 border-b border-line pb-2">
+              <span className="font-semibold text-deep">
+                Target: {debugResult.targetType} <code className="font-mono">{debugResult.targetId}</code>
+              </span>
+              <span className="text-xs text-muted">
+                {debugResult.complaintCount} total complaints recorded
+              </span>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div className="p-3 rounded-xl bg-sand/30 border border-line/60">
+                <span className="text-xs text-muted block">Threshold Flag</span>
+                <span className={`font-semibold ${debugResult.flagExists ? "text-[#3F6130]" : "text-muted"}`}>
+                  {debugResult.flagExists
+                    ? `Flag Open (${debugResult.flag.complaintCount}/${debugResult.flag.threshold})`
+                    : "No Flag Raised"}
+                </span>
+                {debugResult.flag && (
+                  <span className="block text-[11px] text-muted mt-0.5">ID: {debugResult.flag.id}</span>
+                )}
+              </div>
+
+              <div className="p-3 rounded-xl bg-sand/30 border border-line/60">
+                <span className="text-xs text-muted block">Sample Request</span>
+                <span className={`font-semibold ${debugResult.sampleRequestExists ? "text-[#3F6130]" : "text-muted"}`}>
+                  {debugResult.sampleRequestExists ? `Created (${debugResult.sampleRequest.status})` : "None"}
+                </span>
+                {debugResult.sampleRequest && (
+                  <span className="block text-[11px] text-muted mt-0.5">ID: {debugResult.sampleRequest.id}</span>
+                )}
+              </div>
+
+              <div className="p-3 rounded-xl bg-sand/30 border border-line/60">
+                <span className="text-xs text-muted block">Consumer Notifications</span>
+                <span className={`font-semibold ${debugResult.notificationCount > 0 ? "text-[#3F6130]" : "text-muted"}`}>
+                  {debugResult.notificationCount} Alert(s) Dispatched
+                </span>
+              </div>
+            </div>
+
+            {debugResult.notifications?.length > 0 && (
+              <div className="pt-2">
+                <span className="text-xs font-medium text-deep block mb-1">Dispatched Notifications:</span>
+                <div className="space-y-1.5 max-h-40 overflow-y-auto">
+                  {debugResult.notifications.map(n => (
+                    <div
+                      key={n.id}
+                      className="text-xs p-2 rounded-lg bg-cream/50 border border-line/60 flex items-center justify-between"
+                    >
+                      <span>
+                        Consumer: <code className="font-mono">{n.consumerId}</code> · Complaint:{" "}
+                        <code className="font-mono">{n.complaintId}</code>
+                      </span>
+                      <span
+                        className={`font-bold uppercase text-[10px] px-1.5 py-0.5 rounded ${
+                          n.status === "accepted"
+                            ? "bg-safe/20 text-[#3F6130]"
+                            : n.status === "declined"
+                            ? "bg-crit/15 text-crit"
+                            : "bg-review/20 text-[#8A5A12]"
+                        }`}
+                      >
+                        {n.status}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </Panel>
+    </div>
+  );
+}
+
+function Audit() {
+  const [action, setAction] = useState(""),
+    {data, error, reload} = useAsync(() => api.getAudit({action, limit: 150}), [action]);
+
+  if (error) return <ErrorState error={error} onRetry={reload} />;
+  if (!data) return <LoadingState />;
+
+  return (
+    <Panel
+      icon={ScrollText}
+      title="Audit log"
+      desc="An append-only record of sensitive actions. Entries are hash-chained so tampering is detectable."
+      actions={
+        <span
+          className={
+            "inline-flex items-center gap-1.5 text-sm " + (data.chain.ok ? "text-[#3F6130]" : "text-crit font-medium")
+          }
+        >
+          {data.chain.ok ? <ShieldCheck size={16} aria-hidden /> : <ShieldAlert size={16} aria-hidden />}
+          {data.chain.ok
+            ? `Hash chain verified (${data.chain.checked} entries)`
+            : `Hash chain BROKEN at entry ${data.chain.brokenAt}`}
+        </span>
+      }
+    >
+      <div className="flex items-center gap-3 mb-4">
+        <label htmlFor="af" className="text-sm text-muted">
+          Filter
+        </label>
+        <select
+          id="af"
+          value={action}
+          onChange={e => setAction(e.target.value)}
+          className="border border-line rounded-full px-4 py-2 bg-white/70 text-sm"
+        >
+          <option value="">All actions</option>
+          <option value="lab_report">Laboratory reports</option>
+          <option value="threshold">Threshold changes</option>
+          <option value="report">Investigation reports and submissions</option>
+          <option value="investigation">Investigation status</option>
+          <option value="user">Users</option>
+          <option value="auth">Sign-ins</option>
+        </select>
+      </div>
+      {data.entries.length ? (
+        <div className="overflow-x-auto -mx-2">
+          <table className="tbl min-w-[760px]">
+            <thead>
+              <tr>
+                {["Time", "Actor", "Action", "Entity", "Details"].map(h => (
+                  <th key={h}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {data.entries.map(e => (
+                <tr key={e.id}>
+                  <td className="whitespace-nowrap tabular-nums">{fmtDateTime(e.at)}</td>
+                  <td>{e.actor_email || e.actor_role}</td>
+                  <td className="font-medium text-deep">{e.action}</td>
+                  <td>
+                    {e.entity_type} {e.entity_id}
+                  </td>
+                  <td className="text-muted break-all text-xs">{JSON.stringify(e.details).slice(0, 140)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <Empty icon={ScrollText}>No entries.</Empty>
+      )}
+    </Panel>
+  );
+}
+
+const SECTIONS = [
+  ["complaints", "Complaint activity", MapPinned, ComplaintActivity],
+  ["users", "Users and roles", UsersIcon, Users],
+  ["thresholds", "Complaint thresholds", SlidersHorizontal, Thresholds],
+  ["integrations", "Integrations", Plug, Integrations],
+  ["audit", "Audit log", ScrollText, Audit],
+];
+
+export default function Admin() {
+  const [sp, setSp] = useSearchParams(),
+    tab = SECTIONS.some(s => s[0] === sp.get("tab")) ? sp.get("tab") : "complaints",
+    Cur = SECTIONS.find(s => s[0] === tab)[3];
+
+  return (
+    <Page>
+      <PageHeader
+        eyebrow="Administration"
+        title="Administration"
+        sub="Live complaint activity, users and roles, complaint thresholds, integration status and the audit log. Permissions are enforced by the server."
+      />
+      <div className="grid grid-cols-1 lg:grid-cols-[220px_1fr] gap-6 lg:gap-10 items-start">
+        <nav
+          aria-label="Administration sections"
+          className="flex lg:flex-col gap-1 overflow-x-auto lg:sticky lg:top-20 -mx-4 px-4 lg:mx-0 lg:px-0"
+        >
+          {SECTIONS.map(([k, l, I]) => (
+            <button
+              key={k}
+              aria-current={tab === k ? "page" : undefined}
+              onClick={() => setSp({tab: k}, {replace: true})}
+              className={
+                "flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm whitespace-nowrap text-left transition-colors duration-150 " +
+                (tab === k ? "bg-deep text-off" : "text-deep hover:bg-sand/70")
+              }
+            >
+              <I size={16} aria-hidden />
+              {l}
+            </button>
+          ))}
+        </nav>
+        <div className="min-w-0" key={tab}>
+          <Cur />
+        </div>
+      </div>
+    </Page>
+  );
+}
