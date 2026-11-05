@@ -57,6 +57,30 @@ export const Submission = make("Submission", "report_submissions", {report_id: S
 export const Decision = make("Decision", "regulatory_decisions", {investigation_id: String, batch_id: String, decision: String, authority_ref: String, notes: String, decided_on: String, recorded_by: String, recorded_at: String});
 export const Audit = make("Audit", "audit_log", {seq: Number, at: String, actor_id: String, actor_email: String, actor_role: String, action: String, entity_type: String, entity_id: String, details: String, prev_hash: String, hash: String},
   [[{seq: 1}, {unique: true}], [{entity_type: 1, entity_id: 1}, {}]], blockAll("audit_log is append-only"));
+export const Notification = make("Notification", "notifications", {
+  _id: String,
+  consumer_id: String,       // the submitted_by field from Complaint
+  complaint_id: String,      // the complaint that triggered this
+  sample_request_id: String, // the SR created when the flag was raised
+  type: String,              // "sample_collection_requested"
+  status: { type: String, default: "pending" }, // pending | accepted | declined
+  created_at: String,
+  read_at: String,
+  responded_at: String,
+}, [[{ consumer_id: 1, status: 1 }, {}], [{ consumer_id: 1, sample_request_id: 1 }, {}]]);
+export const SampleCollection = make("SampleCollection", "sample_collections", {
+  _id: String,
+  sample_request_id: String,
+  complaint_id: String,
+  consumer_id: String,            // submitted_by from Complaint
+  notification_id: String,
+  collection_address: String,     // consumer provides this on accept
+  scheduled_at: String,
+  stage: { type: String, default: "collection_scheduled" },
+  stage_history: { type: [Mixed], default: [] },  // append-only log: { stage, at, note }
+  lab_report_id: String,          // set when completed
+  created_at: String,
+}, [[{ sample_request_id: 1 }, {}], [{ consumer_id: 1 }, {}], [{ complaint_id: 1 }, {}]]);
 const Counter = make("Counter", "counters", {_id: String, seq: Number});
 
 export async function connectDb(uri = config.mongoUri) {

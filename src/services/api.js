@@ -15,6 +15,14 @@ export const getEnhancedComplaintMap = f => request("/public/complaint-map" + qs
 export const getPublicCorrelations = f => request("/public/correlations" + qs(f));
 export const getPublicComplaints = f => request("/public/complaints" + qs(f));
 
+// notifications & sample collections
+export const getNotifications = () => request("/notifications");
+export const markNotificationRead = id => request(`/notifications/${encodeURIComponent(id)}/read`, {method: "POST", body: {}});
+export const respondNotification = (id, decision, address) => request(`/notifications/${encodeURIComponent(id)}/respond`, {method: "POST", body: {decision, address}});
+export const getSampleCollection = id => request(`/notifications/collections/${encodeURIComponent(id)}`);
+export const getLabCollections = f => request("/lab/collections" + qs(f));
+export const patchCollectionStage = (id, body) => request(`/lab/collections/${encodeURIComponent(id)}/stage`, {method: "PATCH", body});
+
 // session
 export const login = (email, password) => request("/auth/login", {method: "POST", body: {email, password}});
 export const consumerLogin = (email, password) => request("/auth/consumer-login", {method: "POST", body: {email, password}});

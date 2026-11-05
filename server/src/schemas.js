@@ -63,3 +63,14 @@ export const providerRecordsSchema = z.object({records: z.array(z.object({
   readings: z.record(z.union([z.string(), z.number()])).optional(), notes: opt(z.string().max(500)), qualityScore: num(0, 100),
 })).min(1).max(50)});
 export const simulateSchema = z.object({simulate: z.enum(["fail", "flaky", "unavailable", "partial", "ok"]).optional()});
+
+export const notificationRespondSchema = z.object({
+  decision: z.enum(["accepted", "declined"]),
+  address: opt(z.string().trim().min(5, "Address must be at least 5 characters").max(300)),
+});
+
+export const collectionStageSchema = z.object({
+  stage: z.enum(["collected", "in_transit", "at_lab", "testing", "completed"]),
+  note: opt(z.string().trim().max(500)),
+  lab_report_id: opt(z.string().max(40)),
+});

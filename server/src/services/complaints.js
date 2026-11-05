@@ -61,7 +61,7 @@ export async function createComplaint(input, files = {}, actor = null) {
       if (written.length) await Attachment.insertMany(written);
       await audit(actor, "complaint.created", "complaint", id, {batchId, productId, region, attachments: written.length, matched: batchId ? "batch" : productId ? "product" : "none"});
     });
-    outcome = await onComplaintCreated({id, batch_id: batchId, product_id: productId});
+    outcome = await onComplaintCreated({id, batch_id: batchId, product_id: productId, submitted_by: actor?.id, contact: input.contact});
   } catch (e) {
     if (e.code === 11000 && input.idempotencyKey) { discardFiles(written); const d = await existing(); if (d) return d; }
     if (!(await Complaint.exists({_id: id}))) discardFiles(written);

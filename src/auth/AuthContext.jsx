@@ -2,7 +2,7 @@ import {createContext,useCallback,useContext,useEffect,useState} from "react";
 import {getSession,login as apiLogin,consumerLogin as apiConsumerLogin,registerConsumer as apiRegisterConsumer,logout as apiLogout} from "../services/api.js";
 const Ctx=createContext(null);
 export const useAuth=()=>useContext(Ctx);
-export const HOME={reviewer:"/dashboard",admin:"/dashboard",lab:"/laboratory",provider:"/provider"};
+export const HOME={reviewer:"/dashboard",admin:"/dashboard",lab:"/laboratory",provider:"/provider",consumer:"/consumer/map"};
 export function AuthProvider({children}){
   const [user,setUser]=useState(null),[ready,setReady]=useState(false);
   useEffect(()=>{getSession().then(r=>setUser(r.user)).catch(()=>setUser(null)).finally(()=>setReady(true))},[]);

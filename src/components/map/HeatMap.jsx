@@ -132,7 +132,7 @@ function HeatmapMode({hotspots, variant, labels}) {
               weight: isCore ? 1.5 : 0,
               color: isCore ? THEME.off : spotColor,
               fillColor: spotColor,
-              fillOpacity: (highlightedBatchId && node.batchId !== highlightedBatchId) ? fillOpacity * 0.35 : fillOpacity,
+              fillOpacity,
             }}
           >
             {isCore && (

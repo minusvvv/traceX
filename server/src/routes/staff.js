@@ -1,6 +1,6 @@
 import fs from "node:fs";
 import {Router} from "express";
-import {Attachment, Complaint, LabReport, SampleRequest, SrComplaint} from "../db.js";
+import {Attachment, Complaint, LabReport, SampleRequest, SrComplaint, SampleCollection, Product, Notification, nowIso, nextId} from "../db.js";
 import {ah, HttpError, parse} from "../http.js";
 import {requireRole} from "../auth.js";
 import {audit} from "../audit.js";
@@ -12,11 +12,12 @@ import {analytics, dashboardSummary, internalHotspots} from "../services/analyti
 import {listSampleRequests, getSampleRequest, listReports, reportDto, submitLabReport} from "../services/lab.js";
 import * as inv from "../services/investigations.js";
 import {renderReportPdf} from "../services/pdf.js";
-import {closeSchema, decisionSchema, labReportSchema, providerRecordsSchema, sampleSchema, simulateSchema} from "../schemas.js";
+import {closeSchema, decisionSchema, labReportSchema, providerRecordsSchema, sampleSchema, simulateSchema, collectionStageSchema, notificationRespondSchema} from "../schemas.js";
 import {uploader, REPORT_TYPES, filePath, attachmentData} from "../uploads.js";
 import {listThresholds} from "../services/thresholds.js";
 
 const STAFF = ["reviewer", "admin"], LAB_VIEW = ["lab", ...STAFF];
+const STAGES = ["collection_scheduled", "collected", "in_transit", "at_lab", "testing", "completed"];
 const MB = 1024 * 1024;
 const labUpload = uploader({types: REPORT_TYPES, maxBytes: 10 * MB, maxFiles: 5}).fields([{name: "report", maxCount: 1}, {name: "supporting", maxCount: 4}]);
 const simulate = req => parse(simulateSchema, {simulate: req.body?.simulate || req.get("X-Simulate") || undefined}).simulate;
@@ -49,6 +50,195 @@ r.get("/lab/reports/:id", requireRole(...LAB_VIEW), ah(async (req, res) => {
   res.json(d);
 }));
 r.post("/lab/reports", requireRole("lab"), labUpload, ah(async (req, res) => res.status(201).json(await submitLabReport(req.user, parse(labReportSchema, req.body), req.files || {}))));
+
+// ---- sample collections (journey tracking) ----
+r.get("/lab/collections", requireRole(...LAB_VIEW), ah(async (req, res) => {
+  const q = {};
+  if (req.query.sample_request_id) q.sample_request_id = req.query.sample_request_id;
+  if (req.query.stage) q.stage = req.query.stage;
+  const list = await SampleCollection.find(q).sort({created_at: -1}).lean();
+
+  const srIds = [...new Set(list.map(c => c.sample_request_id).filter(Boolean))];
+  const srs = new Map((await SampleRequest.find({_id: {$in: srIds}}).lean()).map(s => [s._id, s]));
+  const cIds = [...new Set(list.map(c => c.complaint_id).filter(Boolean))];
+  const complaints = new Map((await Complaint.find({_id: {$in: cIds}}).select("_id region product_text batch_id product_id").lean()).map(c => [c._id, c]));
+  const pIds = [...new Set([...srs.values()].map(s => s.product_id).concat([...complaints.values()].map(c => c.product_id)).filter(Boolean))];
+  const products = new Map((await Product.find({_id: {$in: pIds}}).select("_id name category").lean()).map(p => [p._id, p]));
+
+  const enriched = list.map(item => {
+    const sr = srs.get(item.sample_request_id);
+    const comp = complaints.get(item.complaint_id);
+    const prod = products.get(sr?.product_id || comp?.product_id);
+    return {
+      ...item,
+      id: item._id,
+      productName: prod?.name || comp?.product_text || "Unknown Product",
+      batchId: sr?.batch_id || comp?.batch_id || null,
+      region: comp?.region || null,
+    };
+  });
+  res.json(enriched);
+}));
+
+r.patch("/lab/collections/:id/stage", requireRole(...LAB_VIEW), ah(async (req, res) => {
+  const {stage, note, lab_report_id} = parse(collectionStageSchema, req.body);
+  const col = await SampleCollection.findById(req.params.id);
+  if (!col) throw new HttpError(404, "Sample collection not found.");
+
+  const currentIdx = STAGES.indexOf(col.stage);
+  const nextIdx = STAGES.indexOf(stage);
+  if (nextIdx <= currentIdx) {
+    throw new HttpError(400, `Cannot move stage backwards or repeat stage. Current stage: ${col.stage}`);
+  }
+
+  const at = nowIso();
+  col.stage = stage;
+  if (lab_report_id) col.lab_report_id = lab_report_id;
+  if (!Array.isArray(col.stage_history)) col.stage_history = [];
+  col.stage_history.push({
+    stage,
+    at,
+    note: note || `Stage updated to ${stage.replace(/_/g, " ")}`
+  });
+  await col.save();
+
+  await audit(req.user, "collection.stage_updated", "sample_collection", col._id, {
+    stage,
+    previousStage: STAGES[currentIdx],
+    lab_report_id: lab_report_id || null
+  });
+
+  res.json(col);
+}));
+
+// ---- direct notification routes on /api/notifications ----
+r.get("/notifications", requireRole(), ah(async (req, res) => {
+  const userKeys = [String(req.user.id), req.user.email].filter(Boolean);
+  const rows = await Notification.find({consumer_id: {$in: userKeys}}).sort({created_at: -1}).limit(50).lean();
+
+  const srIds = [...new Set(rows.map(n => n.sample_request_id).filter(Boolean))];
+  const srs = new Map((await SampleRequest.find({_id: {$in: srIds}}).lean()).map(s => [s._id, s]));
+  const cIds = [...new Set(rows.map(n => n.complaint_id).filter(Boolean))];
+  const complaints = new Map((await Complaint.find({_id: {$in: cIds}}).select("_id batch_id product_id product_text description region").lean()).map(c => [c._id, c]));
+  const pIds = [...new Set([...srs.values()].map(s => s.product_id).concat([...complaints.values()].map(c => c.product_id)).filter(Boolean))];
+  const products = new Map((await Product.find({_id: {$in: pIds}}).select("_id name category").lean()).map(p => [p._id, p]));
+  const collections = new Map((await SampleCollection.find({notification_id: {$in: rows.map(n => n._id)}}).lean()).map(c => [c.notification_id, c]));
+
+  const enriched = rows.map(n => {
+    const sr = srs.get(n.sample_request_id);
+    const c = complaints.get(n.complaint_id);
+    const prod = products.get(sr?.product_id || c?.product_id);
+    const col = collections.get(n._id);
+    return {
+      id: n._id,
+      consumerId: n.consumer_id,
+      complaintId: n.complaint_id,
+      sampleRequestId: n.sample_request_id,
+      type: n.type,
+      status: n.status,
+      createdAt: n.created_at,
+      readAt: n.read_at,
+      respondedAt: n.responded_at,
+      productName: prod?.name || c?.product_text || "Reported Product",
+      batchId: sr?.batch_id || c?.batch_id || null,
+      region: c?.region || null,
+      collectionId: col?._id || null,
+      collectionStage: col?.stage || null,
+    };
+  });
+
+  const unreadCount = rows.filter(n => !n.read_at && n.status === "pending").length;
+  res.json({notifications: enriched, unreadCount});
+}));
+
+r.post("/notifications/:id/read", requireRole(), ah(async (req, res) => {
+  const userKeys = [String(req.user.id), req.user.email].filter(Boolean);
+  const n = await Notification.findOne({_id: req.params.id, consumer_id: {$in: userKeys}});
+  if (!n) throw new HttpError(404, "Notification not found.");
+  if (!n.read_at) {
+    n.read_at = nowIso();
+    await n.save();
+  }
+  res.json({ok: true, readAt: n.read_at});
+}));
+
+r.post("/notifications/:id/respond", requireRole(), ah(async (req, res) => {
+  const userKeys = [String(req.user.id), req.user.email].filter(Boolean);
+  const n = await Notification.findOne({_id: req.params.id, consumer_id: {$in: userKeys}});
+  if (!n) throw new HttpError(404, "Notification not found.");
+  if (n.status !== "pending") {
+    throw new HttpError(400, `You have already ${n.status} this request.`);
+  }
+
+  const {decision, address} = parse(notificationRespondSchema, req.body);
+  const at = nowIso();
+  n.status = decision;
+  n.responded_at = at;
+  n.read_at = n.read_at || at;
+  await n.save();
+
+  let collection = null;
+  if (decision === "accepted") {
+    collection = await SampleCollection.findOne({complaint_id: n.complaint_id});
+    if (!collection) {
+      collection = await SampleCollection.create({
+        _id: await nextId("COL", 3000),
+        sample_request_id: n.sample_request_id,
+        complaint_id: n.complaint_id,
+        consumer_id: String(req.user.id),
+        notification_id: n._id,
+        collection_address: address || "Address provided during confirmation",
+        scheduled_at: at,
+        stage: "collection_scheduled",
+        stage_history: [{
+          stage: "collection_scheduled",
+          at,
+          note: "Consumer accepted sample testing. Collection pickup scheduled."
+        }],
+        created_at: at,
+      });
+      await audit(req.user, "sample_collection.created", "sample_collection", collection._id, {
+        notificationId: n._id,
+        sampleRequestId: n.sample_request_id
+      });
+    }
+  }
+
+  res.json({
+    ok: true,
+    status: n.status,
+    collectionId: collection?._id || null,
+  });
+}));
+
+r.get("/notifications/collections/:id", requireRole(), ah(async (req, res) => {
+  const col = await SampleCollection.findById(req.params.id).lean();
+  if (!col) throw new HttpError(404, "Sample collection journey not found.");
+
+  const isStaff = ["lab", "reviewer", "admin"].includes(req.user.role);
+  const userKeys = [String(req.user.id), req.user.email].filter(Boolean);
+  if (!isStaff && !userKeys.includes(col.consumer_id)) {
+    throw new HttpError(403, "You are not authorized to view this sample journey.");
+  }
+
+  const sr = col.sample_request_id ? await SampleRequest.findById(col.sample_request_id).lean() : null;
+  const comp = col.complaint_id ? await Complaint.findById(col.complaint_id).select("product_id batch_id product_text region").lean() : null;
+  const prodId = sr?.product_id || comp?.product_id;
+  const prod = prodId ? await Product.findById(prodId).select("name category brand").lean() : null;
+
+  res.json({
+    id: col._id,
+    stage: col.stage,
+    scheduledAt: col.scheduled_at,
+    collectionAddress: isStaff ? col.collection_address : undefined,
+    stageHistory: col.stage_history || [],
+    labReportId: col.lab_report_id || null,
+    productName: prod?.name || comp?.product_text || "Reported Product",
+    batchId: sr?.batch_id || comp?.batch_id || null,
+    region: comp?.region || null,
+    createdAt: col.created_at,
+  });
+}));
 
 // ---- investigations & reports ----
 r.get("/investigations", requireRole(...STAFF), ah(async (req, res) => res.json(await inv.listInvestigations({status: req.query.status, category: req.query.category, batch: req.query.batch}))));

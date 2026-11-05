@@ -15,8 +15,8 @@ const chunks = {
   ]
 };
 
-export default defineConfig({
-  base: "/traceX/",
+export default defineConfig(({ command }) => ({
+  base: command === "build" ? "/traceX/" : "/",
 
   plugins: [react(), tailwind()],
 
@@ -44,4 +44,4 @@ export default defineConfig({
       }
     }
   }
-});
+}));

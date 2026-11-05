@@ -1,6 +1,6 @@
 // Complaint-based prioritisation (SRS): per-target complaint counts, threshold flagging, recency-weighted ranking,
 // and the sample-request workflow. All decisions are made here (server side), never in the UI.
-import {Flag, Complaint, Investigation, InvEvent, SampleRequest, SrComplaint, Product, nowIso, nextId} from "../db.js";
+import {Flag, Complaint, Investigation, InvEvent, SampleRequest, SrComplaint, Product, Notification, nowIso, nextId} from "../db.js";
 import {config} from "../config.js";
 import {audit} from "../audit.js";
 import {thresholdFor} from "./thresholds.js";
@@ -31,6 +31,23 @@ export async function createSampleRequest({batchId = null, productId, flagId = n
   if (eligible.length) {
     await SrComplaint.insertMany(eligible.map(c => ({sample_request_id: id, complaint_id: c})), {ordered: false}).catch(e => { if (e.code !== 11000 && !e.writeErrors) throw e; });
     await Complaint.updateMany({_id: {$in: eligible}, sample_requested_at: null}, {$set: {sample_requested_at: at}});
+
+    // Notify eligible consumers who have a contact/account
+    const complaintDocs = await Complaint.find({_id: {$in: eligible}}).select("_id submitted_by contact").lean();
+    const notifs = complaintDocs
+      .filter(c => c.submitted_by || c.contact)
+      .map(c => ({
+        _id: `NTF-${c._id}`,
+        consumer_id: c.submitted_by || c.contact,
+        complaint_id: c._id,
+        sample_request_id: id,
+        type: "sample_collection_requested",
+        status: "pending",
+        created_at: at,
+      }));
+    if (notifs.length) {
+      await Notification.insertMany(notifs, {ordered: false}).catch(() => {});
+    }
   }
   await audit(actor, "sample_request.created", "sample_request", id, {batchId, productId, flagId, reason, complaintsNotified: eligible.length});
   if (investigationId) {
@@ -66,6 +83,21 @@ export async function onComplaintCreated(c) {
     if (sr) {
       await SrComplaint.updateOne({sample_request_id: sr._id, complaint_id: c.id}, {$set: {sample_request_id: sr._id, complaint_id: c.id}}, {upsert: true});
       await Complaint.updateOne({_id: c.id}, {$set: {sample_requested_at: nowIso()}});
+      if (c.submitted_by || c.contact) {
+        await Notification.updateOne(
+          {_id: `NTF-${c.id}`},
+          {$setOnInsert: {
+            _id: `NTF-${c.id}`,
+            consumer_id: c.submitted_by || c.contact,
+            complaint_id: c.id,
+            sample_request_id: sr._id,
+            type: "sample_collection_requested",
+            status: "pending",
+            created_at: nowIso(),
+          }},
+          {upsert: true}
+        ).catch(() => {});
+      }
     }
     await Flag.updateOne({_id: open._id}, {$set: {complaint_count: await effectiveCount(type, id, th.windowDays)}});
     return {flagged: true, flagId: open._id, existing: true};
