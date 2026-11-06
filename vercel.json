@@ -4,8 +4,25 @@
   "installCommand": "npm ci",
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
-  "headers": [{"source": "/api/:path*", "headers": [{"key": "x-vercel-enable-rewrite-caching", "value": "0"}]}],
+  "headers": [
+    {
+      "source": "/api/:path*",
+      "headers": [
+        {
+          "key": "x-vercel-enable-rewrite-caching",
+          "value": "0"
+        }
+      ]
+    }
+  ],
   "rewrites": [
-    {"source": "/((?!api(?:/|$)).*)", "destination": "/index.html"}
+    {
+      "source": "/api/:path*",
+      "destination": "https://tracex-api-preview.onrender.com/api/:path*"
+    },
+    {
+      "source": "/((?!api(?:/|$)).*)",
+      "destination": "/index.html"
+    }
   ]
 }
