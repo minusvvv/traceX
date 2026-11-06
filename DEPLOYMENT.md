@@ -1,5 +1,13 @@
 # TraceX production deployment
 
+## API URL follow-up
+
+The newer frontend at `https://tracex-beta-six.vercel.app` was independently checked: its shipped bundle contains the bare `trace-x-backend-ogllphk01-simpol.vercel.app` hostname, and `/api/health` and `/api/public/meta` return 404. The referenced backend deployment redirects to Vercel login instead of returning public API JSON. None is a verified working backend for this repair.
+
+The browser client now always uses `/api`. Old `VITE_API_URL` values are ignored, and builds warn without echoing their contents. Remove that stale project variable when hosting access is available. All auth endpoints are `/api/auth/register`, `/api/auth/login`, `/api/auth/consumer-login`, `/api/auth/logout` and `/api/auth/me`; the Express source confirms these paths. HTML proxy/error responses now raise an explicit API error instead of returning a misleading successful null response. Page components and styles are unchanged.
+
+`render.preview.yaml` prepares a free, isolated staging API using the repair branch, server root, locked dependencies, readiness endpoint, disabled auto-deploy and server-only secret placeholders. It is not applied automatically and creates no resources by being committed. Its automatic indexing setting is for a new staging database only. Retain the production data/index safety steps below. Render free instances sleep after 15 idle minutes and can take about one minute to wake, so production availability requires an existing suitable instance or approval for an always-on paid plan. No paid service is authorized by this file.
+
 ## Architecture and current status
 
 Frontend: Vite static output on Vercel. Backend: persistent Node 24 / Express process on an HTTPS Node or container host. Database: retain the existing MongoDB, preferably an Atlas replica set. Browser calls remain same-origin `/api`; Vercel rewrites them to the API host. No frontend appearance, page source, route or upload contract was changed.
