@@ -5,7 +5,11 @@ import multer from "multer";
 import {config} from "./config.js";
 import {HttpError} from "./http.js";
 
-fs.mkdirSync(config.uploadDir, {recursive: true});
+try {
+  fs.mkdirSync(config.uploadDir, {recursive: true});
+} catch (e) {
+  console.warn("[uploads] Could not create local uploadDir:", e.message);
+}
 
 const SIGS = {
   "image/jpeg": b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
