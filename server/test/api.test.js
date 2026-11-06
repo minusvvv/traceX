@@ -4,9 +4,13 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {execFile} from "node:child_process";
+import {promisify} from "node:util";
+import {temporaryDatabase, dropTemporaryDatabase} from "./support/database.js";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tracex-"));
-Object.assign(process.env, {MONGO_URI: (process.env.MONGO_URI_TEST || "mongodb://127.0.0.1:27017/") .replace(/\/?$/, "") + "/tracex_test_" + Date.now(), UPLOAD_DIR: path.join(tmp, "up"), RATE_LIMIT: "false", DEMO_PASSWORD: "test-Passw0rd-2026",
+const testDatabase = temporaryDatabase("tracex_test");
+Object.assign(process.env, {MONGO_URI: testDatabase.uri, UPLOAD_DIR: path.join(tmp, "up"), RATE_LIMIT: "false", DEMO_PASSWORD: "test-Passw0rd-2026",
   JWT_SECRET: "test-secret", NODE_ENV: "test", ALLOW_SIMULATION: "true", MOCK_FSSAI_MODE: "ok", MOCK_SUPPLY_CHAIN_MODE: "ok"});
 const PW = process.env.DEMO_PASSWORD;
 let server, base, M;
@@ -22,7 +26,7 @@ before(async () => {
   await seedThresholds(); await seedDemo();
   server = createApp().listen(0); base = `http://127.0.0.1:${server.address().port}/api`;
 });
-after(async () => { server.close(); await M.dropDatabase(); await M.disconnectDb(); fs.rmSync(tmp, {recursive: true, force: true}); });
+after(async () => { server?.close(); if (M) { await dropTemporaryDatabase(M, testDatabase.name); await M.disconnectDb(); } fs.rmSync(tmp, {recursive: true, force: true}); });
 
 async function call(method, url, {body, form, cookie, headers = {}, anonymous = false} = {}) {
   if (!anonymous && !cookie && url === "/public/complaints" && C.consumer) cookie = C.consumer;
@@ -191,12 +195,13 @@ test("same-lot complaints appear together and thresholded complaints reach the p
   const {attachmentData, filePath} = await import("../src/uploads.js");
   const attachment = await M.Attachment.findById(imageId).lean(), storedPath = filePath(attachment), hiddenPath = storedPath + ".test-hidden";
   assert.ok(attachment.data, "complaint image bytes are persisted with the attachment");
-  fs.renameSync(storedPath, hiddenPath);
+  const hadLocalFile = fs.existsSync(storedPath);
+  if (hadLocalFile) fs.renameSync(storedPath, hiddenPath);
   try {
     const fallback = await fetch(base + "/public/complaint-attachments/" + imageId);
     assert.equal(fallback.status, 200, "complaint image is served when its local upload file is unavailable");
     assert.deepEqual(Buffer.from(await fallback.arrayBuffer()), attachmentData(attachment.data));
-  } finally { fs.renameSync(hiddenPath, storedPath); }
+  } finally { if (hadLocalFile) fs.renameSync(hiddenPath, storedPath); }
   assert.ok(!JSON.stringify(status.json.similarReports).includes("consumer@example.com"), "related reports do not expose contact details");
   const unresolvedWithPhoto = complaintForm({identifier: "SHARED-UNMATCHED-TEST"});
   unresolvedWithPhoto.append("photos", png("unmatched.png"), "unmatched.png");
@@ -276,7 +281,7 @@ test("laboratory workflow: authorization, validation, outcomes, immutability", a
   assert.ok((await submit(C.nashik, {...good, contaminationType: undefined})).json.fields.contaminationType);
   assert.ok((await submit(C.nashik, good, {})).json.fields.report, "report file required");
   assert.equal((await call("GET", "/investigations/INV-014", {cookie: C.rev})).json.statusKey, "awaiting_lab", "rejected submissions changed nothing");
-  const done = await submit(C.nashik, good);
+  const done = await submit(C.nashik, good, {report: [Buffer.concat([PDF, Buffer.alloc(6 * 1024 * 1024)])]});
   assert.equal(done.status, 201, done.text); C.lab4 = done.json.id;
   assert.equal(done.json.outcome, "confirmed"); assert.equal(done.json.submittedBy, "Demo Lab Analyst (Nashik)"); assert.equal(done.json.attachments[0].kind, "report");
   const i = (await call("GET", "/investigations/INV-014", {cookie: C.rev})).json;
@@ -427,4 +432,83 @@ test("concurrency: simultaneous requests cannot create duplicates (no SQL constr
   assert.equal(await M.Report.countDocuments({investigation_id: "INV-014"}), 1);
   // 5. a lab report can never be rewritten through the model either
   await assert.rejects(M.LabReport.updateOne({_id: l1.status === 201 ? l1.json.id : l2.json.id}, {$set: {notes: "tampered"}}), /immutable/);
+});
+
+test("lab request list keeps complaint counts and uses bounded database round trips", async () => {
+  const mongoose = (await import('mongoose')).default;
+  const {listSampleRequests, getSampleRequest} = await import('../src/services/lab.js');
+  const user = {role: 'admin'};
+  const initial = await listSampleRequests(user);
+  const detailed = await getSampleRequest(user, initial[0].id);
+  assert.equal(initial[0].complaintCount, detailed.complaints.length);
+  const batch = await M.Batch.findById('MILK-2026-001').lean();
+  await M.SampleRequest.insertMany(Array.from({length: 20}, (_, i) => ({_id: `SR-PERF-${i}`, product_id: batch.product_id, batch_id: batch._id, requested_at: M.nowIso()})));
+  let queries = 0;
+  mongoose.set('debug', () => { queries++; });
+  try {
+    const expanded = await listSampleRequests(user);
+    assert.equal(expanded.length, initial.length + 20);
+    assert.ok(queries <= 5, `bounded query count with 20 extra requests: ${queries}`);
+  } finally { mongoose.set('debug', false); }
+});
+
+test("a fresh production process serves stored uploads and existing sessions without a local upload volume", async () => {
+  const a = await M.Attachment.findOne({owner_type: 'lab_report', owner_id: C.lab4}).select('-data').lean();
+  assert.ok(a?.size > 4.5 * 1024 * 1024, 'existing 10 MB upload contract accepts a 6 MB report');
+  const script = `
+    import crypto from 'node:crypto';
+    import fs from 'node:fs';
+    import {createApp} from './src/app.js';
+    import {disconnectDb} from './src/db.js';
+    const app = createApp().listen(0);
+    const base = 'http://127.0.0.1:' + app.address().port + '/api';
+    try {
+      const me = await fetch(base + '/auth/me', {headers: {Cookie: process.env.TEST_COOKIE}});
+      const att = await fetch(base + '/attachments/' + process.env.TEST_ATTACHMENT, {headers: {Cookie: process.env.TEST_COOKIE}});
+      const bytes = Buffer.from(await att.arrayBuffer());
+      const health = await fetch(base + '/health');
+      const logout = await fetch(base + '/auth/logout', {method: 'POST', headers: {Cookie: process.env.TEST_COOKIE, 'X-TraceX-Client': 'web'}});
+      console.log(JSON.stringify({me: me.status, attachment: att.status, health: health.status, sha256: crypto.createHash('sha256').update(bytes).digest('hex'), logout: logout.status, clearedCookie: logout.headers.get('set-cookie'), noLocalFiles: !fs.existsSync(process.env.UPLOAD_DIR)}));
+    } finally { app.close(); await disconnectDb(); }
+  `;
+  const {stdout} = await promisify(execFile)(process.execPath, ['--input-type=module', '-e', script], {
+    cwd: path.resolve(import.meta.dirname, '..'), timeout: 20000,
+    env: {...process.env, NODE_ENV: 'production', COOKIE_SECURE: 'true', SEED_ON_EMPTY: 'false', UPLOAD_DIR: path.join(tmp, 'fresh-instance'), TEST_COOKIE: C.admin, TEST_ATTACHMENT: a._id},
+  });
+  const result = JSON.parse(stdout.trim());
+  assert.equal(result.me, 200, 'valid cookie authenticates on a cold DB connection');
+  assert.equal(result.attachment, 200); assert.equal(result.sha256, a.sha256);
+  assert.equal(result.health, 200); assert.equal(result.logout, 200);
+  assert.match(result.clearedCookie, /HttpOnly/); assert.match(result.clearedCookie, /Secure/); assert.match(result.clearedCookie, /SameSite=Lax/);
+  assert.equal(result.noLocalFiles, true, 'new instance needs no upload filesystem');
+});
+
+test("historical disk-only attachments remain readable without rewriting their records", async () => {
+  const {filePath} = await import('../src/uploads.js');
+  const legacy = {_id:'legacy-upload-test', owner_type:'lab_report', owner_id:C.lab4, mime:'application/pdf', stored_name:'legacy-test.pdf', original_name:'old-report.pdf', size:PDF.length};
+  fs.mkdirSync(path.dirname(filePath(legacy)), {recursive:true});
+  fs.writeFileSync(filePath(legacy), PDF, {flag:'wx'});
+  await M.Attachment.create(legacy);
+  const res = await fetch(base + '/attachments/' + legacy._id, {headers:{Cookie:C.admin}});
+  assert.equal(res.status,200);
+  assert.deepEqual(Buffer.from(await res.arrayBuffer()),PDF);
+  assert.equal((await M.Attachment.findById(legacy._id).lean()).data, undefined);
+});
+
+test("database outages produce a generic bounded 503 health response", async () => {
+  const script = `
+    import {createApp} from './src/app.js';
+    import {disconnectDb} from './src/db.js';
+    const app = createApp().listen(0);
+    try {
+      const res = await fetch('http://127.0.0.1:' + app.address().port + '/api/health');
+      console.log(JSON.stringify({status:res.status,body:await res.json()}));
+    } finally { app.close(); await disconnectDb(); }
+  `;
+  const {stdout,stderr} = await promisify(execFile)(process.execPath,['--input-type=module','-e',script],{
+    cwd:path.resolve(import.meta.dirname,'..'), timeout:20000,
+    env:{...process.env,MONGO_URI:'mongodb://fixture:private-fixture@127.0.0.1:1/tracex_offline_test'},
+  });
+  assert.deepEqual(JSON.parse(stdout.trim()),{status:503,body:{error:'Database temporarily unavailable. Please try again.'}});
+  assert.ok(!stderr.includes('private-fixture'));
 });

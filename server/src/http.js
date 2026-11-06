@@ -18,6 +18,6 @@ export const errorHandler = (err, req, res, _next) => {
   if (err?.code?.startsWith?.("LIMIT_")) return res.status(422).json({error: "Too many files or unexpected file field."});
   if (err?.type === "entity.parse.failed") return res.status(400).json({error: "Request body is not valid JSON."});
   if (err?.type === "entity.too.large") return res.status(413).json({error: "Request body is too large."});
-  console.error("[error]", req.method, req.originalUrl, err);
+  console.error("[error]", req.method, req.route?.path || "unmatched route", {name: err?.name, code: err?.code});
   res.status(500).json({error: "Something went wrong on the server. Please try again."});
 };

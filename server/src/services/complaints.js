@@ -134,7 +134,7 @@ export async function listComplaints({batchId, productId, category, status, from
   if (category) rows = rows.filter(c => prods.get(c.product_id)?.category === category);
   const batches = new Map((await loadBatches({ids: [...new Set(rows.map(c => c.batch_id).filter(Boolean))]})).map(b => [b.id, b]));
   const prodFlags = new Set((await Flag.find({target_type: "product", status: "open"}).lean()).map(f => f.target_id));
-  const atts = await Attachment.find({owner_type: "complaint", owner_id: {$in: rows.map(c => c._id)}}).lean(), byOwner = new Map();
+  const atts = await Attachment.find({owner_type: "complaint", owner_id: {$in: rows.map(c => c._id)}}).select("-data").lean(), byOwner = new Map();
   for (const a of atts) (byOwner.get(a.owner_id) || byOwner.set(a.owner_id, []).get(a.owner_id)).push(attachmentDto(a));
   const out = rows.map(c => {
     const st = complaintStatus(c, c.batch_id ? batches.get(c.batch_id) : null, prodFlags.has(c.product_id)), p = prods.get(c.product_id);

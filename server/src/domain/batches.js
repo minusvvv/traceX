@@ -32,7 +32,7 @@ export async function loadBatches({ids = null, category = null} = {}) {
   if (!rows.length) return [];
   const bids = rows.map(b => b._id), inB = {$in: bids};
   const ths = await loadThresholds(), windows = [...new Set(rows.map(b => pickThreshold(ths, prods.get(b.product_id).category).windowDays))];
-  const [recs, totals, openFlags, invs, labsAll, pend, decs, anas, ...winCounts] = await Promise.all([
+  const [recs, totals, openFlags, invs, labsAll, pend, decs, ...winCounts] = await Promise.all([
     SupplyRecord.find({batch_id: inB}).sort({occurred_at: 1, _id: 1}).lean(),
     Complaint.aggregate([{$match: {batch_id: inB}}, {$group: {_id: "$batch_id", n: {$sum: 1}}}]),
     Flag.find({target_type: "batch", target_id: inB, status: "open"}).lean(),
@@ -40,9 +40,9 @@ export async function loadBatches({ids = null, category = null} = {}) {
     LabReport.find({batch_id: inB, status: "submitted"}).sort({submitted_at: 1}).lean(),
     SampleRequest.find({batch_id: inB, status: "requested"}).lean(),
     Decision.find({batch_id: inB}).sort({_id: 1}).lean(),
-    Analysis.find().lean(),
     ...windows.map(d => Complaint.aggregate([{$match: {batch_id: inB, created_at: {$gte: new Date(Date.now() - d * 864e5).toISOString()}}}, {$group: {_id: "$batch_id", n: {$sum: 1}}}])),
   ]);
+  const anas = await Analysis.find({_id: {$in: invs.map(i => i._id)}}).select("risk computed_at").lean();
   const records = group(recs, r => r.batch_id), totalMap = new Map(totals.map(t => [t._id, t.n])), flagSet = new Set(openFlags.map(f => f.target_id)), invMap = group(invs, i => i.batch_id);
   const labs = new Map(labsAll.map(l => [l.batch_id, l])), pendSet = new Set(pend.map(r => r.batch_id)), decMap = new Map(decs.map(d => [d.batch_id, d]));
   const winMap = new Map(windows.map((d, i) => [d, new Map(winCounts[i].map(t => [t._id, t.n]))]));

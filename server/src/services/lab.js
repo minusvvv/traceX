@@ -23,10 +23,10 @@ async function complaintSummaries(srId) {
   return (await Complaint.find({_id: {$in: ids}}).sort({created_at: -1}).lean()).map(c => ({id: c._id, date: c.created_at, text: c.description, region: c.region ?? null}));
 }
 async function srDto(s, detail = false) {
-  const cat = getCategory(s.category), complaints = await complaintSummaries(s._id), b = s.batch_id ? await loadBatch(s.batch_id) : null;
-  const dto = {id: s._id, status: s.status, batch: s.batch_id ?? null, productId: s.product_id, product: s.product_name, category: s.category, categoryLabel: cat.label,
-    reason: s.reason, requestedAt: s.requested_at, dueBy: s.due_by, assignedLab: s.assigned_lab ?? null, investigationId: s.investigation_id ?? null, complaintCount: complaints.length, batchIdentified: !!s.batch_id};
+  const cat = getCategory(s.category), complaints = await complaintSummaries(s._id);
+  const dto = sampleRequestDto(s, complaints.length);
   if (detail) {
+    const b = s.batch_id ? await loadBatch(s.batch_id) : null;
     const reps = await LabReport.find({sample_request_id: s._id}).sort({submitted_at: 1}).lean();
     Object.assign(dto, {tests: cat.tests, contaminationTypes: cat.contaminationTypes, complaints,
       batchInfo: b && {id: b.id, lot: b.lot, qty: b.qty, brand: b.brand, manufacturer: b.manufacturer, manufacturedOn: b.manufacturedOn, expiresOn: b.expiresOn, facility: b.facility, route: b.route.map(r => ({stage: r.stage, place: r.place, time: r.time, readings: r.readings}))},
@@ -34,10 +34,19 @@ async function srDto(s, detail = false) {
   }
   return dto;
 }
+function sampleRequestDto(s, complaintCount) {
+  return {id: s._id, status: s.status, batch: s.batch_id ?? null, productId: s.product_id, product: s.product_name, category: s.category, categoryLabel: getCategory(s.category).label,
+    reason: s.reason, requestedAt: s.requested_at, dueBy: s.due_by, assignedLab: s.assigned_lab ?? null, investigationId: s.investigation_id ?? null, complaintCount, batchIdentified: !!s.batch_id};
+}
 
 export async function listSampleRequests(user, {status} = {}) {
   const rows = await withProducts(await SampleRequest.find(status ? {status} : {}).sort({requested_at: -1}).lean());
-  return Promise.all(rows.filter(s => visibleTo(user, s)).map(s => srDto(s)));
+  const visible = rows.filter(s => visibleTo(user, s));
+  const links = await SrComplaint.find({sample_request_id: {$in: visible.map(s => s._id)}}).select("sample_request_id complaint_id").lean();
+  const existing = new Set((await Complaint.find({_id: {$in: [...new Set(links.map(l => l.complaint_id))]}}).select("_id").lean()).map(c => c._id));
+  const counts = new Map();
+  for (const link of links) if (existing.has(link.complaint_id)) counts.set(link.sample_request_id, (counts.get(link.sample_request_id) || 0) + 1);
+  return visible.map(s => sampleRequestDto(s, counts.get(s._id) || 0));
 }
 export async function getSampleRequest(user, id) {
   const s = await srRow(id);
@@ -50,7 +59,7 @@ export async function reportDtos(rows) {
   const batches = new Map((await Batch.find({_id: {$in: [...new Set(rows.map(r => r.batch_id))]}}).lean()).map(b => [b._id, b]));
   const prods = new Map((await Product.find({_id: {$in: [...new Set([...batches.values()].map(b => b.product_id))]}}).lean()).map(p => [p._id, p]));
   const users = new Map((await User.find({_id: {$in: [...new Set(rows.map(r => r.submitted_by).filter(Boolean))]}}).select("name").lean().catch(() => [])).map(u => [String(u._id), u.name]));
-  const atts = await Attachment.find({owner_type: "lab_report", owner_id: {$in: rows.map(r => r._id)}}).sort({uploaded_at: 1}).lean(), byOwner = new Map();
+  const atts = await Attachment.find({owner_type: "lab_report", owner_id: {$in: rows.map(r => r._id)}}).select("-data").sort({uploaded_at: 1}).lean(), byOwner = new Map();
   for (const a of atts) (byOwner.get(a.owner_id) || byOwner.set(a.owner_id, []).get(a.owner_id)).push(attachmentDto(a));
   return rows.map(r => {
     const p = prods.get(batches.get(r.batch_id)?.product_id), cat = getCategory(p?.category), results = jparse(r.results, {});

@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import {temporaryDatabase, dropTemporaryDatabase} from "./support/database.js";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "tracex-correlations-"));
+const testDatabase = temporaryDatabase("tracex_corr_test");
 Object.assign(process.env, {
-  MONGO_URI: (process.env.MONGO_URI_TEST || "mongodb://127.0.0.1:27017/").replace(/\/?$/, "") + "/tracex_corr_test_" + Date.now(),
+  MONGO_URI: testDatabase.uri,
   UPLOAD_DIR: path.join(tmp, "up"),
   RATE_LIMIT: "false",
   DEMO_PASSWORD: "test-Passw0rd-2026",
@@ -48,7 +50,7 @@ before(async () => {
 after(async () => {
   if (server) server.close();
   if (M) {
-    await M.dropDatabase();
+    await dropTemporaryDatabase(M, testDatabase.name);
     await M.disconnectDb();
   }
   fs.rmSync(tmp, {recursive: true, force: true});

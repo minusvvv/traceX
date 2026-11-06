@@ -1,11 +1,12 @@
 // Central configuration. Every secret/URL comes from environment variables (see .env.example).
-import "dotenv/config";
+import dotenv from "dotenv";
 import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+dotenv.config({path: path.join(root, ".env"), quiet: true});
 const env = process.env;
 const prod = env.NODE_ENV === "production";
 const bool = (v, d) => (v === undefined || v === "" ? d : ["1", "true", "yes"].includes(String(v).toLowerCase()));
@@ -16,6 +17,7 @@ const uploadDir = env.VERCEL
   : env.UPLOAD_DIR || (serverless ? path.join(os.tmpdir(), "uploads") : path.join(root, "uploads"));
 
 let jwtSecret = env.JWT_SECRET;
+if (prod && !env.MONGO_URI) throw new Error("MONGO_URI must be set when NODE_ENV=production");
 if (!jwtSecret) {
   if (prod) throw new Error("JWT_SECRET must be set when NODE_ENV=production");
   jwtSecret = crypto.randomBytes(32).toString("hex");
@@ -30,10 +32,14 @@ export const config = {
   sessionHours: int(env.SESSION_HOURS, 8),
   cookieSecure: bool(env.COOKIE_SECURE, prod),
   forceHttps: bool(env.FORCE_HTTPS, false),
+  // Verify the exact proxy chain with the backend host before changing this.
+  trustProxy: env.TRUST_PROXY ? (/^\d+$/.test(env.TRUST_PROXY) ? Number(env.TRUST_PROXY) : env.TRUST_PROXY.split(",").map(s => s.trim())) : 1,
   corsOrigins: (env.CORS_ORIGIN || "http://localhost:5173").split(",").map(s => s.trim()).filter(Boolean),
   mongoUri: env.MONGO_URI || "mongodb://127.0.0.1:27017/tracex",
   // Multi-document transactions need a replica set (Atlas always is one). Leave false for a standalone mongod.
   mongoTransactions: bool(env.MONGO_TRANSACTIONS, false),
+  mongoAutoIndex: bool(env.MONGO_AUTO_INDEX, !prod),
+  mongoMaxPoolSize: Math.max(1, int(env.MONGO_MAX_POOL_SIZE, 10)),
   serverless,
   uploadDir,
   seedOnEmpty: bool(env.SEED_ON_EMPTY, !prod),

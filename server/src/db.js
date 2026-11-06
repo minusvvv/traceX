@@ -2,6 +2,7 @@
 // Timestamps are stored as ISO-8601 strings so they sort and compare lexicographically and serialise unchanged.
 import mongoose from "mongoose";
 import {config} from "./config.js";
+import {createConnectionManager} from "./connection.js";
 
 mongoose.set("strictQuery", true);
 mongoose.set("transactionAsyncLocalStorage", true); // lets tx() attach one session to every operation inside it
@@ -83,9 +84,18 @@ export const SampleCollection = make("SampleCollection", "sample_collections", {
 }, [[{ sample_request_id: 1 }, {}], [{ consumer_id: 1 }, {}], [{ complaint_id: 1 }, {}]]);
 const Counter = make("Counter", "counters", {_id: String, seq: Number});
 
+const ensureConnection = createConnectionManager({
+  isConnected: () => mongoose.connection.readyState === 1,
+  connect: async uri => {
+    await mongoose.connect(uri, {serverSelectionTimeoutMS: 8000, connectTimeoutMS: 8000,
+      waitQueueTimeoutMS: 8000, maxPoolSize: config.mongoMaxPoolSize, minPoolSize: 0,
+      autoIndex: config.mongoAutoIndex, autoCreate: config.mongoAutoIndex});
+    try { if (config.mongoAutoIndex) await Promise.all(Object.values(mongoose.models).map(m => m.init())); }
+    catch (error) { await mongoose.disconnect(); throw error; }
+  },
+});
 export async function connectDb(uri = config.mongoUri) {
-  await mongoose.connect(uri, {serverSelectionTimeoutMS: 8000});
-  await Promise.all(Object.values(mongoose.models).map(m => m.init().catch(e => { console.error(`[db] index build failed for ${m.modelName}:`, e.message); throw e; })));
+  await ensureConnection(uri);
   return mongoose.connection;
 }
 export const disconnectDb = () => mongoose.disconnect();

@@ -1,15 +1,8 @@
 import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 import multer from "multer";
 import {config} from "./config.js";
 import {HttpError} from "./http.js";
-
-try {
-  fs.mkdirSync(config.uploadDir, {recursive: true});
-} catch (e) {
-  console.warn("[uploads] Could not create local uploadDir:", e.message);
-}
 
 const SIGS = {
   "image/jpeg": b => b[0] === 0xff && b[1] === 0xd8 && b[2] === 0xff,
@@ -30,15 +23,15 @@ export const uploader = ({types, maxBytes, maxFiles}) => multer({
 });
 
 // The declared MIME type is not trusted: the file's leading bytes must match it.
-export function persistFiles(files = [], {ownerType, ownerId, kind, userId = null, storeData = false}) {
+export function persistFiles(files = [], {ownerType, ownerId, kind, userId = null}) {
   for (const f of files) if (!SIGS[f.mimetype]?.(f.buffer)) throw new HttpError(422, `“${f.originalname}” does not look like a valid ${EXT[f.mimetype]?.slice(1).toUpperCase() || "file"}.`);
   const saved = []; // validate everything first so a bad later file cannot leave earlier files orphaned on disk
   for (const f of files) {
-    fs.mkdirSync(config.uploadDir, {recursive: true});
     const id = crypto.randomUUID(), stored = id + EXT[f.mimetype];
-    fs.writeFileSync(path.join(config.uploadDir, stored), f.buffer, {flag: "wx"}); // never overwrites
+    // MongoDB is the durable store for every new upload. Older disk-only records
+    // remain readable through the existing filePath fallback.
     saved.push({_id: id, owner_type: ownerType, owner_id: ownerId, kind, original_name: path.basename(f.originalname).slice(0, 120), mime: f.mimetype, size: f.size,
-      ...(storeData || config.serverless ? {data: f.buffer} : {}),
+      data: f.buffer,
       sha256: crypto.createHash("sha256").update(f.buffer).digest("hex"), stored_name: stored, uploaded_by: userId, uploaded_at: new Date().toISOString()});
   }
   return saved;
@@ -51,5 +44,5 @@ export const attachmentData = value => {
   return Buffer.from(value);
 };
 export const attachmentDto = a => ({id: String(a._id ?? a.id), kind: a.kind, name: a.original_name, mime: a.mime, size: a.size, sha256: a.sha256, uploadedAt: a.uploaded_at});
-// Remove files that were written when the surrounding DB transaction later fails.
-export const discardFiles = recs => recs.forEach(r => fs.rmSync(path.join(config.uploadDir, r.stored_name), {force: true}));
+// New uploads have no filesystem side effects to roll back. Never remove legacy files.
+export const discardFiles = () => {};
