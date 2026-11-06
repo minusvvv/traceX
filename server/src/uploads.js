@@ -34,10 +34,11 @@ export function persistFiles(files = [], {ownerType, ownerId, kind, userId = nul
   for (const f of files) if (!SIGS[f.mimetype]?.(f.buffer)) throw new HttpError(422, `“${f.originalname}” does not look like a valid ${EXT[f.mimetype]?.slice(1).toUpperCase() || "file"}.`);
   const saved = []; // validate everything first so a bad later file cannot leave earlier files orphaned on disk
   for (const f of files) {
+    fs.mkdirSync(config.uploadDir, {recursive: true});
     const id = crypto.randomUUID(), stored = id + EXT[f.mimetype];
     fs.writeFileSync(path.join(config.uploadDir, stored), f.buffer, {flag: "wx"}); // never overwrites
     saved.push({_id: id, owner_type: ownerType, owner_id: ownerId, kind, original_name: path.basename(f.originalname).slice(0, 120), mime: f.mimetype, size: f.size,
-      ...(storeData ? {data: f.buffer} : {}),
+      ...(storeData || config.serverless ? {data: f.buffer} : {}),
       sha256: crypto.createHash("sha256").update(f.buffer).digest("hex"), stored_name: stored, uploaded_by: userId, uploaded_at: new Date().toISOString()});
   }
   return saved;

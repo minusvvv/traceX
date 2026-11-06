@@ -1,6 +1,7 @@
 // Central configuration. Every secret/URL comes from environment variables (see .env.example).
 import "dotenv/config";
 import crypto from "node:crypto";
+import os from "node:os";
 import path from "node:path";
 import {fileURLToPath} from "node:url";
 
@@ -9,6 +10,10 @@ const env = process.env;
 const prod = env.NODE_ENV === "production";
 const bool = (v, d) => (v === undefined || v === "" ? d : ["1", "true", "yes"].includes(String(v).toLowerCase()));
 const int = (v, d) => (Number.isFinite(parseInt(v, 10)) ? parseInt(v, 10) : d);
+const serverless = Boolean(env.VERCEL || env.AWS_LAMBDA_FUNCTION_NAME);
+const uploadDir = env.VERCEL
+  ? path.join(os.tmpdir(), "uploads")
+  : env.UPLOAD_DIR || (serverless ? path.join(os.tmpdir(), "uploads") : path.join(root, "uploads"));
 
 let jwtSecret = env.JWT_SECRET;
 if (!jwtSecret) {
@@ -29,7 +34,8 @@ export const config = {
   mongoUri: env.MONGO_URI || "mongodb://127.0.0.1:27017/tracex",
   // Multi-document transactions need a replica set (Atlas always is one). Leave false for a standalone mongod.
   mongoTransactions: bool(env.MONGO_TRANSACTIONS, false),
-  uploadDir: env.UPLOAD_DIR || (env.VERCEL || env.AWS_LAMBDA_FUNCTION_NAME ? "/tmp/uploads" : path.join(root, "uploads")),
+  serverless,
+  uploadDir,
   seedOnEmpty: bool(env.SEED_ON_EMPTY, !prod),
   demoPassword: env.DEMO_PASSWORD || "",
   // Integrations. "mock" adapters are explicitly labelled as simulated everywhere they surface.
