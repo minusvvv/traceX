@@ -512,3 +512,22 @@ test("database outages produce a generic bounded 503 health response", async () 
   assert.deepEqual(JSON.parse(stdout.trim()),{status:503,body:{error:'Database temporarily unavailable. Please try again.'}});
   assert.ok(!stderr.includes('private-fixture'));
 });
+
+test("sample collection list, journey aliases and updates enforce laboratory assignments", async () => {
+  const id = 'COL-ASSIGNMENT-TEST', sr = 'SR-ASSIGNMENT-TEST';
+  await M.SampleRequest.create({_id:sr,batch_id:'MILK-2026-004',product_id:'PRD-MILK-FC',assigned_lab:'Nashik Lab',status:'requested',requested_at:M.nowIso()});
+  await M.SampleCollection.create({_id:id,sample_request_id:sr,consumer_id:C.consumerUserId,collection_address:'Fictional staging address',stage:'collection_scheduled',created_at:M.nowIso()});
+  const rows = cookie => call('GET','/lab/collections',{cookie});
+  assert.ok((await rows(C.nashik)).json.some(c=>c.id===id));
+  assert.ok((await rows(C.admin)).json.some(c=>c.id===id));
+  assert.ok(!(await rows(C.pune)).json.some(c=>c.id===id));
+  for (const prefix of ['/notifications/collections/','/public/notifications/collections/']) {
+    assert.equal((await call('GET',prefix+id,{cookie:C.pune})).status,404);
+    assert.equal((await call('GET',prefix+id,{cookie:C.nashik})).status,200);
+    const own = await call('GET',prefix+id,{cookie:C.consumer});
+    assert.equal(own.status,200); assert.ok(!('collectionAddress' in own.json));
+  }
+  assert.equal((await call('PATCH','/lab/collections/'+id+'/stage',{cookie:C.pune,body:{stage:'collected'}})).status,404);
+  assert.equal((await M.SampleCollection.findById(id).lean()).stage,'collection_scheduled');
+  assert.equal((await call('PATCH','/lab/collections/'+id+'/stage',{cookie:C.nashik,body:{stage:'collected'}})).status,200);
+});

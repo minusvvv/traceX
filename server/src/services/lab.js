@@ -10,6 +10,7 @@ export const OUTCOME_LABEL = {confirmed: "Contamination confirmed", not_confirme
 const fieldErr = (msg, fields) => new HttpError(422, msg, {fields});
 const same = (a, b) => String(a || "").toLowerCase() === String(b || "").toLowerCase();
 const visibleTo = (user, s) => user.role !== "lab" || !s.assigned_lab || same(s.assigned_lab, user.lab_name);
+export const canViewSampleRequest = (user, s) => !!s && visibleTo(user, s);
 
 async function withProducts(rows) {
   const prods = new Map((await Product.find({_id: {$in: [...new Set(rows.map(r => r.product_id))]}}).lean()).map(p => [p._id, p]));

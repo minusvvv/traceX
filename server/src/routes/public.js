@@ -13,6 +13,7 @@ import {createComplaint, publicComplaintView, listMyComplaints} from "../service
 import {publicHeatmap, enhancedComplaintMap, publicCorrelations, publicComplaintsList} from "../services/analytics.js";
 import {uploader, IMAGE_TYPES, filePath, attachmentData} from "../uploads.js";
 import {REGIONS} from "../geo.js";
+import {canViewSampleRequest} from "../services/lab.js";
 
 export const limiter = (windowMs, max, message) => config.rateLimit
   ? rateLimit({windowMs, max, standardHeaders: true, legacyHeaders: false, handler: (_q, _s, next) => next(new HttpError(429, message))})
@@ -210,6 +211,7 @@ r.get("/notifications/collections/:id", requireRole(), ah(async (req, res) => {
   }
 
   const sr = col.sample_request_id ? await SampleRequest.findById(col.sample_request_id).lean() : null;
+  if (req.user.role === "lab" && !canViewSampleRequest(req.user, sr)) throw new HttpError(404, "Sample collection journey not found.");
   const comp = col.complaint_id ? await Complaint.findById(col.complaint_id).select("product_id batch_id product_text region").lean() : null;
   const prodId = sr?.product_id || comp?.product_id;
   const prod = prodId ? await Product.findById(prodId).select("name category brand").lean() : null;

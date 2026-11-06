@@ -9,7 +9,7 @@ import {loadBatch, loadBatches} from "../domain/batches.js";
 import {listComplaints} from "../services/complaints.js";
 import {rankFlagged} from "../services/prioritization.js";
 import {analytics, dashboardSummary, internalHotspots} from "../services/analytics.js";
-import {listSampleRequests, getSampleRequest, listReports, reportDto, submitLabReport} from "../services/lab.js";
+import {listSampleRequests, getSampleRequest, listReports, reportDto, submitLabReport, canViewSampleRequest} from "../services/lab.js";
 import * as inv from "../services/investigations.js";
 import {renderReportPdf} from "../services/pdf.js";
 import {closeSchema, decisionSchema, labReportSchema, providerRecordsSchema, sampleSchema, simulateSchema, collectionStageSchema, notificationRespondSchema} from "../schemas.js";
@@ -60,12 +60,13 @@ r.get("/lab/collections", requireRole(...LAB_VIEW), ah(async (req, res) => {
 
   const srIds = [...new Set(list.map(c => c.sample_request_id).filter(Boolean))];
   const srs = new Map((await SampleRequest.find({_id: {$in: srIds}}).lean()).map(s => [s._id, s]));
-  const cIds = [...new Set(list.map(c => c.complaint_id).filter(Boolean))];
+  const visible = req.user.role === "lab" ? list.filter(c => canViewSampleRequest(req.user, srs.get(c.sample_request_id))) : list;
+  const cIds = [...new Set(visible.map(c => c.complaint_id).filter(Boolean))];
   const complaints = new Map((await Complaint.find({_id: {$in: cIds}}).select("_id region product_text batch_id product_id").lean()).map(c => [c._id, c]));
   const pIds = [...new Set([...srs.values()].map(s => s.product_id).concat([...complaints.values()].map(c => c.product_id)).filter(Boolean))];
   const products = new Map((await Product.find({_id: {$in: pIds}}).select("_id name category").lean()).map(p => [p._id, p]));
 
-  const enriched = list.map(item => {
+  const enriched = visible.map(item => {
     const sr = srs.get(item.sample_request_id);
     const comp = complaints.get(item.complaint_id);
     const prod = products.get(sr?.product_id || comp?.product_id);
@@ -84,6 +85,10 @@ r.patch("/lab/collections/:id/stage", requireRole(...LAB_VIEW), ah(async (req, r
   const {stage, note, lab_report_id} = parse(collectionStageSchema, req.body);
   const col = await SampleCollection.findById(req.params.id);
   if (!col) throw new HttpError(404, "Sample collection not found.");
+  if (req.user.role === "lab") {
+    const sr = await SampleRequest.findById(col.sample_request_id).select("assigned_lab").lean();
+    if (!canViewSampleRequest(req.user, sr)) throw new HttpError(404, "Sample collection not found.");
+  }
 
   const currentIdx = STAGES.indexOf(col.stage);
   const nextIdx = STAGES.indexOf(stage);
@@ -222,6 +227,7 @@ r.get("/notifications/collections/:id", requireRole(), ah(async (req, res) => {
   }
 
   const sr = col.sample_request_id ? await SampleRequest.findById(col.sample_request_id).lean() : null;
+  if (req.user.role === "lab" && !canViewSampleRequest(req.user, sr)) throw new HttpError(404, "Sample collection journey not found.");
   const comp = col.complaint_id ? await Complaint.findById(col.complaint_id).select("product_id batch_id product_text region").lean() : null;
   const prodId = sr?.product_id || comp?.product_id;
   const prod = prodId ? await Product.findById(prodId).select("name category brand").lean() : null;
