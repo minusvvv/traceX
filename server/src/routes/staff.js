@@ -276,6 +276,7 @@ r.get("/attachments/:id", requireRole(...LAB_VIEW), ah(async (req, res) => {
     if (!ok) throw new HttpError(404, "File not found.");
   }
   await audit(req.user, "attachment.downloaded", a.owner_type, a.owner_id, {attachment: a._id});
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.setHeader("Content-Disposition", `attachment; filename="${a.original_name.replace(/[^\w.\- ]/g, "_")}"`);
   res.type(a.mime);
   if (fs.existsSync(filePath(a))) res.sendFile(filePath(a));

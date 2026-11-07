@@ -17,7 +17,11 @@ export function createApp() {
 
   if (config.prod) app.set("trust proxy", 1);
   if (config.forceHttps) app.use((req, res, next) => req.secure ? next() : res.redirect(308, `https://${req.headers.host}${req.originalUrl}`));
-  app.use(helmet({hsts: config.forceHttps, contentSecurityPolicy: {directives: {defaultSrc: ["'none'"], frameAncestors: ["'none'"]}}}));
+  app.use(helmet({
+    hsts: config.forceHttps,
+    contentSecurityPolicy: {directives: {defaultSrc: ["'none'"], frameAncestors: ["'none'"]}},
+    crossOriginResourcePolicy: {policy: "cross-origin"},
+  }));
   app.use(cors({origin: (o, cb) => cb(null, !o || config.corsOrigins.includes(o)), credentials: true, allowedHeaders: ["Content-Type", "Idempotency-Key", "X-TraceX-Client", "X-Simulate"]}));
   app.use(express.json({limit: "100kb"}), cookieParser(), authenticate, requireClientHeader);
 

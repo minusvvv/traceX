@@ -59,6 +59,7 @@ r.get("/complaint-attachments/:id", ah(async (req, res) => {
   if (!a || !IMAGE_TYPES.includes(a.mime) || (!a.data && !fs.existsSync(filePath(a)))) throw new HttpError(404, "Image not found.");
   res.setHeader("Cache-Control", "public, max-age=3600");
   res.setHeader("Content-Disposition", "inline");
+  res.setHeader("Cross-Origin-Resource-Policy", "cross-origin");
   res.type(a.mime);
   if (fs.existsSync(filePath(a))) res.sendFile(filePath(a));
   else res.send(attachmentData(a.data));
