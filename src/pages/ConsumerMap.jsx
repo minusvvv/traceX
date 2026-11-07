@@ -45,7 +45,7 @@ export default function ConsumerMap() {
   const [filterCityOnly, setFilterCityOnly] = useState(false);
   const [filterMineOnly, setFilterMineOnly] = useState(false);
   useEffect(() => {
-    if (!user) setFilterMineOnly(false);
+    if (user?.role !== "consumer") setFilterMineOnly(false);
   }, [user]);
   const [detectedCity, setDetectedCity] = useState("");
   const [cityInput, setCityInput] = useState("");
@@ -408,7 +408,22 @@ export default function ConsumerMap() {
             </button>
 
             {/* Quick Filter: My Complaints */}
-            {!user ? (
+            {user?.role === "consumer" ? (
+              <button
+                type="button"
+                aria-pressed={filterMineOnly}
+                onClick={() => setFilterMineOnly(!filterMineOnly)}
+                style={{
+                  background: filterMineOnly ? THEME.deep : THEME.off,
+                  color: filterMineOnly ? THEME.off : THEME.deep,
+                  borderColor: filterMineOnly ? THEME.deep : THEME.line,
+                }}
+                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm"
+              >
+                <UserCheck size={14} style={{color: filterMineOnly ? THEME.cream : THEME.muted}} />
+                View your complaints
+              </button>
+            ) : (
               <Link
                 to="/login"
                 style={{
@@ -422,21 +437,6 @@ export default function ConsumerMap() {
                 <Lock size={13} style={{color: THEME.muted}} />
                 Sign in to view your complaints
               </Link>
-            ) : (
-              <button
-                type="button"
-                aria-pressed={filterMineOnly}
-                onClick={() => setFilterMineOnly(!filterMineOnly)}
-                style={{
-                  background: filterMineOnly ? THEME.deep : THEME.off,
-                  color: filterMineOnly ? THEME.off : THEME.deep,
-                  borderColor: filterMineOnly ? THEME.deep : THEME.line,
-                }}
-                className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-xs font-semibold border transition shadow-sm"
-              >
-                <UserCheck size={14} style={{color: filterMineOnly ? THEME.cream : THEME.muted}} />
-                My Complaints
-              </button>
             )}
           </div>
 
