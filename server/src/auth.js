@@ -15,9 +15,9 @@ export const publicUser = u => u && ({id: String(u._id ?? u.id), email: u.email,
 
 export const issueSession = (res, user) => {
   const token = jwt.sign({sub: String(user._id ?? user.id), role: user.role}, config.jwtSecret, {expiresIn: `${config.sessionHours}h`});
-  res.cookie(COOKIE, token, {httpOnly: true, sameSite: "lax", secure: config.cookieSecure, maxAge: config.sessionHours * 3600e3, path: "/"});
+  res.cookie(COOKIE, token, {httpOnly: true, sameSite: config.cookieSecure ? "none" : "lax", secure: config.cookieSecure, maxAge: config.sessionHours * 3600e3, path: "/"});
 };
-export const clearSession = res => res.clearCookie(COOKIE, {httpOnly: true, sameSite: "lax", secure: config.cookieSecure, path: "/"});
+export const clearSession = res => res.clearCookie(COOKIE, {httpOnly: true, sameSite: config.cookieSecure ? "none" : "lax", secure: config.cookieSecure, path: "/"});
 
 // Attaches req.user when a valid session cookie is present. Role/active state is always re-read from the database,
 // so deactivating an account or changing its role takes effect immediately.
